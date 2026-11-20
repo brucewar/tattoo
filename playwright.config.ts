@@ -6,7 +6,9 @@ export default defineConfig({
   workers: 1,
   timeout: 60000,
   expect: { timeout: 10000 },
-  reporter: [['list'], ['html', { open: 'never' }]],
+  reporter: process.env.GITHUB_ACTIONS
+    ? [['github'], ['list'], ['html', { open: 'never' }]]
+    : [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: process.env.TATTOO_E2E_BASE_URL ?? 'http://127.0.0.1:8080',
     browserName: 'chromium',
