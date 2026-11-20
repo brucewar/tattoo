@@ -101,10 +101,12 @@ Remove-Item Env:TATTOO_NEW_PASSWORD
 
 ## 浏览器验证
 
-数据库测试容器就绪且应用已构建后，设置与集成测试相同的 `TEST_DATABASE_URL`，执行 `node tests/e2e/run-p2.mjs`。它创建独立数据库 schema，启动真实 API、Worker、Vite 和本地模拟微信服务，使用 Playwright 验证登录、账号配置、封面上传、测试草稿，以及文章编辑、修订、预览、冲突、会话恢复、普通文章草稿投递和窄屏布局；结束后清理自有进程和测试数据。脚本名沿用 P2，实际运行 P2/P3/P4 全部浏览器用例。
+数据库测试容器就绪且应用已构建后，设置与集成测试相同的 `TEST_DATABASE_URL`，执行 `node tests/e2e/run-p2.mjs`。它创建独立数据库 schema，启动真实 API、Worker、Vite 和本地模拟微信服务，使用 Playwright 验证登录、账号配置、封面上传、测试草稿，以及文章编辑、修订、预览、冲突、会话恢复、普通文章草稿投递和窄屏布局；结束后清理自有进程和测试数据。脚本名沿用 P2，实际运行 P2/P3/P4/P5 全部浏览器用例。
 
 首次使用可运行 `npx playwright install chromium` 安装与当前锁文件匹配的浏览器；如使用已有浏览器，可通过 `TATTOO_E2E_BROWSER_EXECUTABLE` 指定可执行文件，不将本机路径写进仓库。在 Windows 上，应先停止本项目 API/Worker 子进程，再执行需要重新生成 Prisma Client 的构建，避免引擎 DLL 被占用。
 
 ## 持久化与后续恢复
 
-普通重建使用 `docker compose up -d --build`，不要添加 `down -v`。备份应包含一致的 PostgreSQL 导出和素材卷，主密钥独立保存；完整备份恢复脚本与实测在 P5 交付。恢复实例先保持 `REMOTE_WRITES_ENABLED=false`，核对旧任务后再显式启用。此开关不代表微信账号已具备写权限。
+普通重建使用 `docker compose up -d --build`，不要添加 `down -v`。备份应包含一致的 PostgreSQL 导出和素材卷，主密钥独立保存；已提供 `node scripts/backup.mjs` 与 `node scripts/restore.mjs`；管理电脑通过当前 Docker context 操作目标容器，数据库与素材采用同一次停机备份。具体参数、主密钥和匹配镜像保管、空实例恢复及旧任务核对见 [运维说明](OPERATIONS.md)。恢复实例先保持 `REMOTE_WRITES_ENABLED=false`，核对旧任务后再显式启用。此开关不代表微信账号已具备写权限。
+
+恢复工具的独立容器验收入口为 `npm run verify:recovery`，需要已构建的应用/Web 镜像和可在管理电脑环回地址访问的 Docker 发布端口。它只创建随机隔离项目并在结束后删除自身容器和卷，不操作日常部署；结果见 [P5 验证记录](P5-VERIFICATION.md)。

@@ -307,7 +307,7 @@ try {
     join(root, 'apps/web'),
   );
   await ready(webOrigin, vite);
-  console.info('P2/P3/P4 浏览器验证：独立 API、Worker、Vite 和模拟微信已就绪');
+  console.info('P2/P3/P4/P5 浏览器验证：独立 API、Worker、Vite 和模拟微信已就绪');
   const playwright = start(
     'Playwright',
     [join(root, 'node_modules/@playwright/test/cli.js'), 'test'],

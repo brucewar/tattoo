@@ -37,3 +37,5 @@ jobs:
       - run: docker compose config --quiet
       - run: docker compose build
       - run: node scripts/verify-foundation.mjs
+      - name: Verify isolated backup and recovery
+        run: npm run verify:recovery

@@ -112,6 +112,11 @@ export function DeliveryDetail({
           type={delivery.state === 'UNCERTAIN' ? 'warning' : 'error'}
           showIcon
           message={delivery.error}
+          description={
+            delivery.state === 'FAILED' && /\b4800[14]\b/.test(delivery.error)
+              ? '请在微信后台核对该账号的新增草稿权限；只读验证成功不代表可写入草稿。'
+              : undefined
+          }
         />
       )}
       {(delivery.state === 'QUEUED' || delivery.state === 'RUNNING') && (

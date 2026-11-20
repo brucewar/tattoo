@@ -1,10 +1,10 @@
 # Tattoo
 
-自托管的内容创作与多平台产出工作台，部署环境为群晖 Docker。完整目标涵盖 RSS/搜索/指定链接资料获取、AI 写作/改写/配图、微信公众号草稿，以及知乎与小红书内容导出和后续接入。
+自托管的内容创作与多平台产出工作台，通过标准 Docker / Docker Compose 部署（包括支持 Docker 的 NAS）。完整目标涵盖 RSS/搜索/指定链接资料获取、AI 写作/改写/配图、微信公众号草稿，以及知乎与小红书内容导出和后续接入。
 
 代码仓库：[brucewar/tattoo](https://github.com/brucewar/tattoo)。
 
-> 当前状态：**P4 普通文章草稿投递的本地与模拟验收已完成**。支持编辑、图片、不可变修订、公众号预览，以及确认账号和修订后由后台存入微信草稿、查看结果和处理失败；真实微信公众号与目标 NAS 验收未执行。
+> 当前状态：**P4 普通文章草稿投递的本地与模拟验收已完成**。支持编辑、图片、不可变修订、公众号预览，以及确认账号和修订后由后台存入微信草稿、查看结果和处理失败；真实微信公众号验收未执行。
 
 ## 设计与实施
 
@@ -27,15 +27,16 @@ cd tattoo
 
 ## 本地启动
 
-需要 Node.js 22（至少 22.15）和 Docker Compose。
+Docker 主机需要运行 Linux 容器的 Docker Engine / Compose。以下配置命令在有 Node.js 22（至少 22.15）的管理电脑执行，Docker 主机不额外需要 Node.js。
 
 ```bash
-npm ci
-npm run setup
+node scripts/configure.mjs
 docker compose up -d --build --wait
 ```
 
-配置文件已存在时跳过 `setup`，避免覆盖密钥。启动后访问 `http://localhost:8080`，使用本机 `.env` 的管理员配置登录。AppID/AppSecret 在账号设置页填写；创建测试草稿还需显式启用远程写入，步骤见开发说明。
+配置文件已存在时跳过配置生成，避免覆盖密钥。启动后访问 `http://localhost:8080`，使用本机 `.env` 的管理员配置登录。AppID/AppSecret 在账号设置页填写；创建测试草稿还需显式启用远程写入，步骤见开发说明。
+
+运行维护、停机备份恢复和升级步骤见 [运维说明](docs/OPERATIONS.md)，自动验收与真实微信检查见 [验收索引](docs/ACCEPTANCE.md) 和 [P5 验证记录](docs/P5-VERIFICATION.md)。
 
 ## 第一阶段范围
 
