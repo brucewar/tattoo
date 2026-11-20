@@ -10,13 +10,17 @@ it('配置生成使用随机密钥且拒绝覆盖现有部署配置', async () =
   try {
     const file = join(directory, '.env');
     const script = resolve('scripts/configure.mjs');
-    const first = spawnSync(process.execPath, [script, '--output', file], { encoding: 'utf8' });
+    // Two real Node launches can exceed Vitest's 5s default during a Windows cold start.
+    const options = { encoding: 'utf8' as const, timeout: 20000, windowsHide: true };
+    const first = spawnSync(process.execPath, [script, '--output', file], options);
     expect(first.status).toBe(0);
     const before = await readFile(file, 'utf8');
     const key = before.match(/^APP_ENCRYPTION_KEY=(.+)$/m)?.[1];
     expect(Buffer.from(key!, 'base64')).toHaveLength(32);
     expect(first.stdout).not.toContain(key);
-    expect(spawnSync(process.execPath, [script, '--output', file]).status).not.toBe(0);
+    const second = spawnSync(process.execPath, [script, '--output', file], options);
+    expect(second.error).toBeUndefined();
+    expect(second.status).toBe(1);
     expect(await readFile(file, 'utf8')).toBe(before);
   } finally {
     if (
@@ -26,4 +30,4 @@ it('配置生成使用随机密钥且拒绝覆盖现有部署配置', async () =
       throw new Error('临时目录范围校验失败');
     await rm(directory, { recursive: true });
   }
-});
+}, 60000);

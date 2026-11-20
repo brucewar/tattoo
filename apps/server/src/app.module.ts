@@ -6,6 +6,7 @@ import { IdentityModule } from './identity/identity.module';
 import { AccountsModule } from './accounts/accounts.module';
 import { AssetsModule } from './assets/assets.module';
 import { PublishingModule } from './publishing/publishing.module';
+import { ContentModule } from './content/content.module';
 import { CsrfGuard } from './csrf.guard';
 
 @Controller('health')
@@ -29,7 +30,14 @@ class HealthController {
 }
 
 @Module({
-  imports: [RuntimeModule, IdentityModule, AccountsModule, AssetsModule, PublishingModule],
+  imports: [
+    RuntimeModule,
+    IdentityModule,
+    AccountsModule,
+    AssetsModule,
+    PublishingModule,
+    ContentModule,
+  ],
   providers: [{ provide: APP_GUARD, useClass: CsrfGuard }],
   controllers: [HealthController],
 })

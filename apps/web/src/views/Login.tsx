@@ -3,7 +3,17 @@ import { Alert, Button, Form, Input } from 'antd';
 import { api, errorMessage, jsonRequest } from '../api';
 import { Brand, type User } from '../ui';
 
-export function Login({ onLogin, expired }: { onLogin: (user: User) => void; expired: boolean }) {
+export function Login({
+  onLogin,
+  expired,
+  embedded = false,
+  email,
+}: {
+  onLogin: (user: User) => void;
+  expired: boolean;
+  embedded?: boolean;
+  email?: string;
+}) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   async function login(values: { email: string; password: string }) {
@@ -18,6 +28,60 @@ export function Login({ onLogin, expired }: { onLogin: (user: User) => void; exp
       setPending(false);
     }
   }
+  const form = (
+    <div className="login-form-inner">
+      {!embedded && (
+        <>
+          <p className="eyebrow">欢迎回来</p>
+          <h2>登录工作台</h2>
+          <p className="secondary">使用部署时配置的管理员账号。</p>
+        </>
+      )}
+      {expired && (
+        <Alert
+          type="info"
+          showIcon
+          message={
+            embedded
+              ? '未保存的文章仍保留在当前页面。重新登录后可以继续保存，请勿关闭或刷新页面。'
+              : '会话已过期，请重新登录。'
+          }
+        />
+      )}
+      {error && <Alert type="error" showIcon message={error} />}
+      <Form
+        layout="vertical"
+        onFinish={login}
+        requiredMark={false}
+        size="large"
+        name={embedded ? 'reauth' : 'login'}
+        initialValues={{ email }}
+      >
+        <Form.Item
+          name="email"
+          label="管理员邮箱"
+          rules={[
+            { required: true, message: '请输入管理员邮箱' },
+            { type: 'email', message: '请输入有效的邮箱地址' },
+          ]}
+        >
+          <Input autoComplete="username" placeholder="请输入邮箱" autoFocus />
+        </Form.Item>
+        <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
+          <Input.Password
+            autoComplete="current-password"
+            placeholder="请输入密码"
+            maxLength={256}
+          />
+        </Form.Item>
+        <Button block type="primary" htmlType="submit" loading={pending}>
+          登录
+        </Button>
+      </Form>
+      <p className="form-note">忘记密码时，请由部署管理员在服务器上重置。</p>
+    </div>
+  );
+  if (embedded) return form;
   return (
     <main className="login-layout">
       <section className="login-intro" aria-label="Tattoo 内容工作台">
@@ -37,42 +101,7 @@ export function Login({ onLogin, expired }: { onLogin: (user: User) => void; exp
         </div>
         <p className="login-footnote">自托管 · 内容创作与投递</p>
       </section>
-      <section className="login-form-panel">
-        <div className="login-form-inner">
-          <p className="eyebrow">欢迎回来</p>
-          <h2>登录工作台</h2>
-          <p className="secondary">使用部署时配置的管理员账号。</p>
-          {expired && <Alert type="info" showIcon message="会话已过期，请重新登录。" />}
-          {error && <Alert type="error" showIcon message={error} />}
-          <Form layout="vertical" onFinish={login} requiredMark={false} size="large" name="login">
-            <Form.Item
-              name="email"
-              label="管理员邮箱"
-              rules={[
-                { required: true, message: '请输入管理员邮箱' },
-                { type: 'email', message: '请输入有效的邮箱地址' },
-              ]}
-            >
-              <Input autoComplete="username" placeholder="请输入邮箱" autoFocus />
-            </Form.Item>
-            <Form.Item
-              name="password"
-              label="密码"
-              rules={[{ required: true, message: '请输入密码' }]}
-            >
-              <Input.Password
-                autoComplete="current-password"
-                placeholder="请输入密码"
-                maxLength={256}
-              />
-            </Form.Item>
-            <Button block type="primary" htmlType="submit" loading={pending}>
-              登录
-            </Button>
-          </Form>
-          <p className="form-note">忘记密码时，请由部署管理员在服务器上重置。</p>
-        </div>
-      </section>
+      <section className="login-form-panel">{form}</section>
     </main>
   );
 }

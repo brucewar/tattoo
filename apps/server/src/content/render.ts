@@ -1,28 +1,15 @@
-import type { DocumentNode } from '@tattoo/contracts';
+import { documentSchema, safeHttpUrl, type DocumentNode } from '@tattoo/contracts';
 
-export const RENDER_VERSION = 'wechat-editorial-v1';
+export const RENDER_VERSION = 'wechat-editorial-v2';
 export class ContentError extends Error {}
 const escape = (v: string) =>
   v.replace(
     /[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   );
-const allowedNodes = new Set([
-  'doc',
-  'text',
-  'paragraph',
-  'heading',
-  'bulletList',
-  'orderedList',
-  'listItem',
-  'blockquote',
-  'codeBlock',
-  'hardBreak',
-  'horizontalRule',
-  'image',
-]);
-const allowedMarks = new Set(['bold', 'italic', 'strike', 'code', 'link', 'underline']);
 export function inspectDocument(doc: DocumentNode): { text: string; assetIds: string[] } {
+  const parsed = documentSchema.safeParse(doc);
+  if (!parsed.success) throw new ContentError(parsed.error.issues[0]?.message ?? '正文结构无效');
   const assets = new Set<string>(),
     texts: string[] = [],
     stack = [{ node: doc, depth: 0 }];
@@ -30,13 +17,9 @@ export function inspectDocument(doc: DocumentNode): { text: string; assetIds: st
   while (stack.length) {
     const { node, depth } = stack.pop()!;
     if (++count > 5000 || depth > 30) throw new ContentError('正文结构过深或内容过多');
-    if (!allowedNodes.has(node.type)) throw new ContentError(`不支持的正文块：${node.type}`);
-    if (node.marks?.some((m) => !allowedMarks.has(m.type)))
-      throw new ContentError('正文包含不支持的文字样式');
     if (node.type === 'text') texts.push(node.text ?? '');
     if (node.type === 'image') {
       const id = String(node.attrs?.assetId ?? '');
-      if (!/^[0-9a-f-]{36}$/i.test(id)) throw new ContentError('正文图片必须先上传到素材库');
       assets.add(id);
     }
     for (const child of [...(node.content ?? [])].reverse())
@@ -62,8 +45,7 @@ export function renderDocument(doc: DocumentNode, imageUrls: Record<string, stri
             value = `<code style="background:#f0f3f2;padding:2px 5px;font-family:monospace;">${value}</code>`;
           if (mark.type === 'link') {
             const href = String(mark.attrs?.href ?? '');
-            if (/^https?:\/\//i.test(href))
-              value += ` <span style="font-size:12px;color:#758078;">[${escape(href)}]</span>`;
+            value += ` <span style="font-size:12px;color:#758078;">[${escape(href)}]</span>`;
           }
         }
         return value;
@@ -71,13 +53,13 @@ export function renderDocument(doc: DocumentNode, imageUrls: Record<string, stri
       case 'paragraph':
         return `<p style="margin:0 0 18px;">${children() || '<br>'}</p>`;
       case 'heading': {
-        const level = Math.max(2, Math.min(3, Number(n.attrs?.level) || 2));
+        const level = Number(n.attrs?.level);
         return `<h${level} style="font-size:${level === 2 ? 22 : 18}px;line-height:1.5;margin:30px 0 16px;font-weight:700;color:#182f26;">${children()}</h${level}>`;
       }
       case 'bulletList':
         return `<ul style="padding-left:24px;">${children()}</ul>`;
       case 'orderedList':
-        return `<ol style="padding-left:24px;">${children()}</ol>`;
+        return `<ol start="${n.attrs?.start ?? 1}" style="padding-left:24px;">${children()}</ol>`;
       case 'listItem':
         return `<li style="margin-bottom:8px;">${children()}</li>`;
       case 'blockquote':
@@ -90,7 +72,12 @@ export function renderDocument(doc: DocumentNode, imageUrls: Record<string, stri
         return '<hr style="border:0;border-top:1px solid #e4e9e6;margin:28px 0;">';
       case 'image': {
         const url = imageUrls[String(n.attrs?.assetId)] ?? `/api/v1/assets/${n.attrs?.assetId}`;
-        if (!/^https:\/\//.test(url) && !/^\/api\/v1\/assets\/[0-9a-f-]{36}$/i.test(url))
+        if (
+          !(url.startsWith('https://') && safeHttpUrl.safeParse(url).success) &&
+          !/^\/api\/v1\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            url,
+          )
+        )
           throw new ContentError('图片地址无效');
         return `<img src="${escape(url)}" alt="${escape(String(n.attrs?.alt ?? ''))}" style="display:block;max-width:100%;height:auto;margin:20px auto;">`;
       }

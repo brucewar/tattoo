@@ -4,7 +4,7 @@
 
 代码仓库：[brucewar/tattoo](https://github.com/brucewar/tattoo)。
 
-> 当前状态：**P2 本地功能与模拟验收已完成**。可登录、配置公众号、只读验证并显式创建固定测试草稿；完整文章编辑与投递仍在后续阶段，真实微信公众号验收未执行。
+> 当前状态：**P3 内容编辑与本地验收已完成**。支持文章编辑、图片、不可变修订、冲突处理及公众号预览，保留 P2 的账号验证和固定测试草稿入口；普通文章投递在 P4，真实微信公众号验收未执行。
 
 ## 设计与实施
 
@@ -23,7 +23,7 @@ cd tattoo
 
 将仓库克隆到自己选择的目录即可。
 
-开发与 Docker 验证步骤见 [开发说明](docs/DEVELOPMENT.md)，实际结果见 [P1 验证记录](docs/P1-VERIFICATION.md) 和 [P2 验证记录](docs/P2-VERIFICATION.md)。
+开发与 Docker 验证步骤见 [开发说明](docs/DEVELOPMENT.md)，实际结果见 [P1 验证记录](docs/P1-VERIFICATION.md)、[P2 验证记录](docs/P2-VERIFICATION.md) 和 [P3 验证记录](docs/P3-VERIFICATION.md)。
 
 ## 本地启动
 

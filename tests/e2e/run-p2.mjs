@@ -194,11 +194,13 @@ try {
       String(webPort),
       '--strictPort',
     ],
-    env,
+    // Keep server-side mocks in test mode, but use the real browser component runtime.
+    // rc-util deliberately gives every dialog the same ID in NODE_ENV=test.
+    { ...env, NODE_ENV: 'development' },
     join(root, 'apps/web'),
   );
   await ready(webOrigin, vite);
-  console.info('P2 浏览器验证：独立 API、Worker、Vite 和模拟微信已就绪');
+  console.info('P2/P3 浏览器验证：独立 API、Worker、Vite 和模拟微信已就绪');
   const playwright = start(
     'Playwright',
     [join(root, 'node_modules/@playwright/test/cli.js'), 'test'],
@@ -213,7 +215,7 @@ try {
   assert.equal(calls.draft, 1);
   assert.deepEqual(unexpected, []);
   console.info(
-    'PASS: 浏览器真实操作完成，模拟微信仅创建一个封面素材和一篇草稿，没有发表或群发调用',
+    'PASS: 账号与文章编辑浏览器验证完成，模拟微信仅创建一个封面素材和一篇测试草稿，没有发表或群发调用',
   );
 } catch (error) {
   for (const entry of logs.values())

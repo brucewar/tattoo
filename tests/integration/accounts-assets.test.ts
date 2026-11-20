@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import sharp from 'sharp';
@@ -69,6 +69,33 @@ describe('安全素材上传', () => {
     ]) {
       await expect(assets.upload(value, 'pretend.png')).rejects.toMatchObject({ status: 400 });
     }
+  });
+  it('应用 EXIF 方向并去除元数据，微信压缩副本不改写本地素材', async () => {
+    const rotated = await sharp({
+      create: { width: 31, height: 19, channels: 3, background: '#b86f44' },
+    })
+      .jpeg()
+      .withMetadata({ orientation: 6 })
+      .toBuffer();
+    const asset = await assets.upload(rotated, 'oriented.jpg');
+    ids.add(asset.id);
+    const file = await assets.getFile(asset.id);
+    const before = await readFile(file.path);
+    const metadata = await sharp(before).metadata();
+    expect([metadata.width, metadata.height]).toEqual([19, 31]);
+    expect(metadata.orientation).toBeUndefined();
+    expect(metadata.exif).toBeUndefined();
+    expect(metadata.icc).toBeUndefined();
+    await assets.coverBuffer(asset.id);
+    expect(await readFile(file.path)).toEqual(before);
+    const oversized = await sharp({
+      create: { width: 5001, height: 4000, channels: 3, background: '#ffffff' },
+    })
+      .png()
+      .toBuffer();
+    await expect(assets.upload(oversized, 'too-many-pixels.png')).rejects.toMatchObject({
+      status: 400,
+    });
   });
   it('文件写入失败不留下可引用的素材记录', async () => {
     const occupied = join(directory, 'not-a-directory');

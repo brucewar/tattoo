@@ -16,6 +16,7 @@ async function login(page: Page) {
   await page.getByLabel('管理员邮箱', { exact: true }).fill(process.env.TATTOO_E2E_EMAIL!);
   await page.getByLabel('密码', { exact: true }).fill(process.env.TATTOO_E2E_PASSWORD!);
   await page.getByRole('button', { name: '登录', exact: true }).click();
+  await page.getByRole('button', { name: '公众号账号', exact: true }).click();
   await expect(page.getByRole('heading', { name: '公众号账号', exact: true })).toBeVisible();
 }
 
@@ -28,6 +29,7 @@ test('错误登录被拒绝，正确登录后的会话 Cookie 受保护，退出
   expect((await page.request.get('/api/v1/auth/me')).status()).toBe(401);
   await page.getByLabel('密码', { exact: true }).fill(process.env.TATTOO_E2E_PASSWORD!);
   await page.getByRole('button', { name: '登录', exact: true }).click();
+  await page.getByRole('button', { name: '公众号账号', exact: true }).click();
   await expect(page.getByRole('heading', { name: '公众号账号', exact: true })).toBeVisible();
   const cookie = (await context.cookies()).find((value) => value.name === 'tattoo_session');
   expect(cookie?.httpOnly).toBe(true);
