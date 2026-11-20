@@ -78,6 +78,28 @@
   flex-wrap: wrap;
   gap: 10px;
 }
+.delivery-account-picker {
+  margin-top: 24px;
+}
+.delivery-account-picker .ant-select {
+  width: 100%;
+}
+.delivery-check-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+.delivery-checks {
+  margin-bottom: 20px;
+}
+.delivery-target {
+  margin-top: 18px;
+}
+.delivery-target > div {
+  grid-template-columns: 86px minmax(0, 1fr);
+}
 .article-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 270px;

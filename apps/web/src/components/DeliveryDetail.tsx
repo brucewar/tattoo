@@ -102,6 +102,9 @@ export function DeliveryDetail({
       </div>
       <h3>{delivery.revision?.title ?? 'Tattoo 接口测试草稿'}</h3>
       {delivery.account?.name && <p className="secondary">目标账号：{delivery.account.name}</p>}
+      {delivery.revision?.version && (
+        <p className="secondary">投递修订：v{delivery.revision.version}</p>
+      )}
       <p role="status">当前阶段：{delivery.stage}</p>
       {(error || actionError) && <Alert type="error" showIcon message={actionError || error} />}
       {delivery.error && (
@@ -123,7 +126,7 @@ export function DeliveryDetail({
               ? '已由管理员人工确认创建'
               : '微信接口已返回草稿创建成功'
           }
-          description="请到微信后台检查封面与正文。测试产生的草稿和素材需要你按需清理。"
+          description="请到微信后台检查封面与正文。草稿和素材保留在所选公众号中，请按需管理。"
         />
       )}
       {delivery.remoteId && (
@@ -139,8 +142,7 @@ export function DeliveryDetail({
         <div className="reconcile-panel">
           <h4>核对这次投递</h4>
           <p>
-            微信可能已经创建草稿，系统不会自动重投。请先停止旧
-            Worker，再到微信后台核对本账号的测试草稿。
+            微信可能已经创建草稿，系统不会自动重投。请先停止旧 Worker，再到微信后台核对本次草稿。
           </p>
           <p className="form-note">
             部署管理员停止命令：<code>docker compose stop worker</code>。正在运行的 Worker

@@ -5,7 +5,15 @@ import { api, errorMessage } from '../api';
 import { date, type Page } from '../ui';
 import { ArticleEditor } from '../components/ArticleEditor';
 
-export function Content({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => void }) {
+export function Content({
+  onDirtyChange,
+  remoteWritesEnabled,
+  onInspectRecords,
+}: {
+  onDirtyChange: (dirty: boolean) => void;
+  remoteWritesEnabled: boolean;
+  onInspectRecords: () => void;
+}) {
   const [selected, setSelected] = useState<string | null | undefined>(undefined);
   const [page, setPage] = useState(1);
   const [version, setVersion] = useState(0);
@@ -37,6 +45,8 @@ export function Content({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => 
         key={selected ?? 'new'}
         id={selected}
         onDirtyChange={onDirtyChange}
+        remoteWritesEnabled={remoteWritesEnabled}
+        onInspectRecords={onInspectRecords}
         onBack={() => {
           setSelected(undefined);
           setVersion((current) => current + 1);

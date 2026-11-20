@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdtemp, readdir, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { promisify } from 'node:util';
 import { Client } from 'pg';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -32,8 +33,14 @@ const secrets = [
 ].filter(Boolean);
 const children = [];
 const logs = new Map();
-const calls = { token: 0, count: 0, cover: 0, draft: 0 };
+const calls = { token: 0, count: 0, cover: 0, body: 0, draft: 0 };
+const draftPayloads = [];
+let nextDraftMode = 'success';
 const unexpected = [];
+const executeFile = promisify(execFile);
+const cleanupErrors = [];
+let failed = false;
+let primaryError;
 let createdSchema = false;
 let storage;
 let temporaryRoot;
@@ -63,6 +70,7 @@ function start(name, args, env, cwd = root, visible = false) {
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
+    detached: process.platform !== 'win32',
   });
   children.push(child);
   logs.set(child, { name, text: '' });
@@ -91,9 +99,8 @@ async function ready(url, child) {
 async function wait(child) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      child.kill('SIGKILL');
-      reject(new Error('浏览器测试超过五分钟'));
-    }, 300000);
+      reject(new Error('浏览器测试超过十分钟'));
+    }, 600000);
     child.once('error', (error) => {
       clearTimeout(timeout);
       reject(error);
@@ -106,15 +113,96 @@ async function wait(child) {
 }
 
 async function stop(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('验证子进程未按时结束')), 5000);
-    child.once('exit', () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-    child.kill('SIGKILL');
+  if (child.exitCode !== null || child.signalCode !== null || !Number.isInteger(child.pid)) return;
+  const label = `${logs.get(child).name} (PID ${child.pid})`;
+  // Windows process startup/exit notifications can be slow under host load.
+  // Reserve the last five seconds for reclaiming our taskkill helper itself.
+  const stopMilliseconds = process.platform === 'win32' ? 45000 : 15000;
+  const deadlineAt = Date.now() + stopMilliseconds;
+  let onExit;
+  const exited = new Promise((resolve) => {
+    onExit = resolve;
+    child.once('exit', onExit);
   });
+  let terminationError;
+  let taskkillChild;
+  let timeout;
+  const terminate = async () => {
+    try {
+      if (process.platform === 'win32') {
+        const taskkill = process.env.SystemRoot
+          ? join(process.env.SystemRoot, 'System32', 'taskkill.exe')
+          : 'taskkill.exe';
+        const killing = executeFile(taskkill, ['/PID', String(child.pid), '/T', '/F'], {
+          windowsHide: true,
+          timeout: stopMilliseconds - 5000,
+        });
+        taskkillChild = killing.child;
+        await killing;
+      } else {
+        // start() creates an isolated POSIX process group for each owned child.
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch (error) {
+          if (error.code !== 'ESRCH') throw error;
+          child.kill('SIGKILL');
+        }
+      }
+    } catch (error) {
+      terminationError = error;
+    }
+    await exited;
+  };
+  try {
+    await Promise.race([
+      terminate(),
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`${label} 未在 ${stopMilliseconds / 1000} 秒内结束`)),
+          stopMilliseconds,
+        );
+      }),
+    ]);
+  } catch (error) {
+    if (child.exitCode === null && child.signalCode === null)
+      throw new Error(`${label} 清理失败`, { cause: terminationError ?? error });
+  } finally {
+    clearTimeout(timeout);
+    child.removeListener('exit', onExit);
+    if (taskkillChild && taskkillChild.exitCode === null && taskkillChild.signalCode === null) {
+      let helperTimer;
+      let onHelperExit;
+      const helperExited = new Promise((resolve) => {
+        onHelperExit = resolve;
+        taskkillChild.once('exit', onHelperExit);
+      });
+      taskkillChild.kill('SIGKILL');
+      try {
+        await Promise.race([
+          helperExited,
+          new Promise((_, reject) => {
+            helperTimer = setTimeout(
+              () => reject(new Error(`${label} 的 taskkill 助手未结束 (PID ${taskkillChild.pid})`)),
+              Math.max(1, deadlineAt - Date.now()),
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(helperTimer);
+        taskkillChild.removeListener('exit', onHelperExit);
+      }
+    }
+  }
+}
+
+async function cleanup(label, operation) {
+  try {
+    await operation();
+  } catch (error) {
+    cleanupErrors.push(
+      new Error(`${label}：${redact(error instanceof Error ? error.message : String(error))}`),
+    );
+  }
 }
 
 try {
@@ -132,11 +220,18 @@ try {
   storage = await mkdtemp(join(temporaryRoot, 'tattoo-p2-e2e-'));
   mock = createServer(async (incoming, outgoing) => {
     const pathname = new URL(incoming.url ?? '/', 'http://mock.local').pathname;
-    for await (const _chunk of incoming) {
-      /* Consume request bytes without logging credentials. */
-    }
+    const chunks = [];
+    for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
+    const body = Buffer.concat(chunks);
     outgoing.setHeader('Content-Type', 'application/json');
-    if (pathname === '/cgi-bin/stable_token') {
+    if (pathname === '/__tattoo_control' && incoming.method === 'POST') {
+      const input = JSON.parse(body.toString('utf8'));
+      assert.ok(['success', 'disconnect', 'refused'].includes(input.nextDraft));
+      nextDraftMode = input.nextDraft;
+      outgoing.end(JSON.stringify({ ok: true }));
+    } else if (pathname === '/__tattoo_audit' && incoming.method === 'GET') {
+      outgoing.end(JSON.stringify({ calls, draftPayloads, unexpected }));
+    } else if (pathname === '/cgi-bin/stable_token') {
       calls.token++;
       outgoing.end(JSON.stringify({ access_token: token, expires_in: 7200 }));
     } else if (pathname === '/cgi-bin/draft/count') {
@@ -144,10 +239,21 @@ try {
       outgoing.end(JSON.stringify({ total_count: 2 }));
     } else if (pathname === '/cgi-bin/material/add_material') {
       calls.cover++;
-      outgoing.end(JSON.stringify({ media_id: 'p2-e2e-cover' }));
+      outgoing.end(JSON.stringify({ media_id: `tattoo-e2e-cover-${calls.cover}` }));
+    } else if (pathname === '/cgi-bin/media/uploadimg') {
+      calls.body++;
+      outgoing.end(
+        JSON.stringify({ url: `https://mmbiz.qpic.cn/tattoo-e2e-body-${calls.body}.jpg` }),
+      );
     } else if (pathname === '/cgi-bin/draft/add') {
       calls.draft++;
-      outgoing.end(JSON.stringify({ media_id: `p2-e2e-draft-${calls.draft}` }));
+      draftPayloads.push(JSON.parse(body.toString('utf8')));
+      const mode = nextDraftMode;
+      nextDraftMode = 'success';
+      if (mode === 'disconnect') incoming.socket.destroy();
+      else if (mode === 'refused')
+        outgoing.end(JSON.stringify({ errcode: 48001, errmsg: 'api unauthorized' }));
+      else outgoing.end(JSON.stringify({ media_id: `p2-e2e-draft-${calls.draft}` }));
     } else {
       unexpected.push(pathname);
       outgoing.statusCode = 404;
@@ -180,6 +286,7 @@ try {
     TATTOO_E2E_BASE_URL: webOrigin,
     TATTOO_E2E_EMAIL: adminEmail,
     TATTOO_E2E_PASSWORD: adminPassword,
+    TATTOO_E2E_WECHAT_CONTROL_URL: `http://127.0.0.1:${mockAddress.port}`,
   };
   const api = start('API', [join(root, 'apps/server/dist/main.js')], env);
   await ready(`${apiOrigin}/api/v1/health/ready`, api);
@@ -200,7 +307,7 @@ try {
     join(root, 'apps/web'),
   );
   await ready(webOrigin, vite);
-  console.info('P2/P3 浏览器验证：独立 API、Worker、Vite 和模拟微信已就绪');
+  console.info('P2/P3/P4 浏览器验证：独立 API、Worker、Vite 和模拟微信已就绪');
   const playwright = start(
     'Playwright',
     [join(root, 'node_modules/@playwright/test/cli.js'), 'test'],
@@ -211,30 +318,52 @@ try {
   await wait(playwright);
   assert.ok(calls.token >= 1);
   assert.ok(calls.count >= 1);
-  assert.equal(calls.cover, 1);
-  assert.equal(calls.draft, 1);
-  assert.deepEqual(unexpected, []);
-  console.info(
-    'PASS: 账号与文章编辑浏览器验证完成，模拟微信仅创建一个封面素材和一篇测试草稿，没有发表或群发调用',
+  assert.ok(calls.cover >= 1);
+  assert.ok(calls.draft >= 1);
+  assert.equal(
+    draftPayloads.filter((payload) => payload.articles?.[0]?.title === 'Tattoo 接入测试').length,
+    1,
   );
+  assert.deepEqual(unexpected, []);
 } catch (error) {
+  failed = true;
+  primaryError = error;
   for (const entry of logs.values())
     if (entry.name !== 'Playwright') console.error(`${entry.name} 日志：${redact(entry.text)}`);
-  throw error;
 } finally {
-  for (const child of [...children].reverse()) await stop(child);
+  for (const child of [...children].reverse())
+    await cleanup(`停止 ${logs.get(child).name}`, () => stop(child));
   if (mock) {
-    mock.closeAllConnections();
-    await new Promise((resolve) => mock.close(resolve));
+    await cleanup('关闭模拟微信', async () => {
+      mock.closeAllConnections();
+      if (mock.listening)
+        await new Promise((resolve, reject) =>
+          mock.close((error) => (error ? reject(error) : resolve())),
+        );
+    });
   }
   if (createdSchema) {
-    if (!/^tattoo_p2_e2e_[0-9a-f]{32}$/.test(schema)) throw new Error('验证 schema 范围校验失败');
-    await database.query(`DROP SCHEMA "${schema}" CASCADE`);
+    await cleanup('删除本次验证 schema', async () => {
+      if (!/^tattoo_p2_e2e_[0-9a-f]{32}$/.test(schema)) throw new Error('验证 schema 范围校验失败');
+      await database.query({ text: 'SET statement_timeout = 15000', query_timeout: 15000 });
+      await database.query({ text: `DROP SCHEMA "${schema}" CASCADE`, query_timeout: 15000 });
+    });
   }
-  await database.end();
+  await cleanup('关闭验证数据库连接', () => database.end());
   if (storage) {
-    if (dirname(storage) !== temporaryRoot || !basename(storage).startsWith('tattoo-p2-e2e-'))
-      throw new Error('临时素材目录范围校验失败');
-    await rm(storage, { recursive: true });
+    await cleanup('删除本次临时素材目录', async () => {
+      if (dirname(storage) !== temporaryRoot || !basename(storage).startsWith('tattoo-p2-e2e-'))
+        throw new Error('临时素材目录范围校验失败');
+      await rm(storage, { recursive: true });
+    });
   }
 }
+
+if (failed) {
+  for (const error of cleanupErrors) console.error(`额外清理错误：${error.message}`);
+  throw primaryError;
+}
+if (cleanupErrors.length) throw new AggregateError(cleanupErrors, '浏览器验证后的资源清理失败');
+console.info(
+  'PASS: 账号、文章编辑及投递浏览器验证完成，固定测试草稿仅创建一次，没有发表或群发调用',
+);

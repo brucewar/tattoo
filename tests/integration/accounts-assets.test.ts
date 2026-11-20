@@ -87,6 +87,15 @@ describe('安全素材上传', () => {
     expect(metadata.exif).toBeUndefined();
     expect(metadata.icc).toBeUndefined();
     await assets.coverBuffer(asset.id);
+    const bodyCopy = await assets.bodyBuffer(asset.id);
+    expect(bodyCopy.length).toBeLessThan(1_000_000);
+    expect((await sharp(bodyCopy).metadata()).format).toBe('jpeg');
+    await expect(assets.coverBuffer(asset.id, Date.now() - 1)).rejects.toMatchObject({
+      status: 400,
+    });
+    await expect(assets.bodyBuffer(asset.id, Date.now() + 500)).rejects.toMatchObject({
+      status: 400,
+    });
     expect(await readFile(file.path)).toEqual(before);
     const oversized = await sharp({
       create: { width: 5001, height: 4000, channels: 3, background: '#ffffff' },

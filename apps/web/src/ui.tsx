@@ -12,7 +12,7 @@ export type DeliveryRecord = {
   resultSource?: string | null;
   createdAt: string;
   account?: { id: string; name: string };
-  revision?: { title: string };
+  revision?: { id?: string; articleId?: string; title: string; version?: number };
   events?: { actor: string; message: string; createdAt: string }[];
 };
 

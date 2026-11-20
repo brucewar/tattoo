@@ -219,8 +219,8 @@ describe('P3 文章与不可变修订 HTTP / PostgreSQL', () => {
       await request(`/articles/${created.id}/preview`, 'POST', { revisionId: created.revisionId }),
     );
     expect(preview.revisionId).toBe(created.revisionId);
-    expect(preview.platformLimitsVerified).toBe(false);
-    expect(preview.warnings.join('；')).toMatch(/封面.*正文.*待核验/);
+    expect(preview.platformLimitsVerified).toBe(true);
+    expect(preview.warnings.join('；')).toMatch(/封面.*正文/);
     expect(preview.html).toContain('<section');
     const unfinished = await data(
       await request('/articles', 'POST', {

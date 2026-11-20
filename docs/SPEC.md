@@ -174,11 +174,13 @@ AT-09 依赖用户账号凭证、有效 IP 白名单与实际网络。缺少这�
 
 v0.3 补充确认：完整产品目标保留资料获取、AI 创作与配图、微信草稿及知乎/小红书导出；实施顺序先完成微信草稿闭环，再做采集和 AI。队列继续采用 PostgreSQL，需求与验证结果触发后续技术评估；本轮不改变现有单 Worker、修订或投递结果处理规则。
 
-## 8. 微信依据与未核验项
+## 8. 微信依据与真实验收边界
 
-官方参考入口：[新增草稿](https://developers.weixin.qq.com/doc/offiaccount/Draft_Box/Add_draft.html)、[永久素材及正文图片](https://developers.weixin.qq.com/doc/offiaccount/Asset_Management/Adding_Permanent_Assets.html)、[稳定版接口凭据](https://developers.weixin.qq.com/doc/offiaccount/Basic_Information/getStableAccessToken.html)。实施时须核对对应订阅号/服务号的现行文档及账号后台权限。
+官方参考入口：[新增草稿](https://developers.weixin.qq.com/doc/subscription/api/draftbox/draftmanage/api_draft_add.html)、[永久封面素材](https://developers.weixin.qq.com/doc/subscription/api/material/permanent/api_addmaterial.html)、[正文图片](https://developers.weixin.qq.com/doc/subscription/api/material/permanent/api_uploadimage.html)、[稳定版接口凭据](https://developers.weixin.qq.com/doc/subscription/api/base/api_getstableaccesstoken.html)。
 
-2026-11-20 本轮尝试读取微信官方文档，抓取失败；因此未将搜索摘要或脚手架常数作为已核验依据。目标个人未认证账号的实际草稿写权限、字段计量方式、图片大小限制与 token 方案均须在接入验证中记录来源和结果。没有凭证时不运行真实接口；测试操作需用户在部署环境显式发起。
+2026-11-20，P4 通过直接 HTTPS 读取新版订阅号官方页面，核验了草稿、图片、计数和稳定 token 协议；先前旧路径读取失败的历史保留在 P2 记录。来源、页面日期、字段与图片边界、UTF-16/十进制字节的应用保守计量见 [微信核验记录](WECHAT-API.md)。
+
+目标个人未认证账号的实际权限、出口白名单和真实草稿效果仍未验收。没有凭证时不运行真实接口；测试操作需用户在部署环境显式发起。官方规则读取成功和模拟测试通过均不代表真实微信验收通过。
 
 ## 9. 流程门槛
 

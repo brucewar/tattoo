@@ -1,335 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Input, Modal, Spin, Tag, Tooltip } from 'antd';
-import { EditorContent, Node, useEditor, type Editor } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import type {
-  Article,
-  ArticleInput,
-  ArticlePreview,
-  Asset,
-  DocumentNode,
-  Revision,
-  RevisionSummary,
-} from '@tattoo/contracts';
-import { articleInput, initialDocument, safeHttpUrl } from '@tattoo/contracts';
+import { Alert, Button, Input, Spin } from 'antd';
+import { EditorContent, useEditor } from '@tiptap/react';
+import type { Article, ArticleInput, Asset, DocumentNode } from '@tattoo/contracts';
+import { articleInput, initialDocument } from '@tattoo/contracts';
 import { api, ApiError, errorMessage, jsonRequest } from '../api';
-import { date, type Page } from '../ui';
+import { blankArticle, fields, fingerprint } from './article/model';
+import { WritingKit, LocalImage, isSafeLink, pasteProblem } from './article/document';
+import { ArticleToolbar } from './article/Toolbar';
+import { ArticleMetadata } from './article/Metadata';
+import { ArticleRevisionActions } from './article/RevisionViews';
+import { ArticleLinkDialog } from './article/LinkDialog';
+import { ArticleDelivery } from './article/ArticleDelivery';
 import '../editor.css';
-
-const assetIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const assetUrl = (id: string) => `/api/v1/assets/${id}`;
-
-// Only an asset reference is persisted. Browser URLs are derived at render time.
-const LocalImage = Node.create({
-  name: 'image',
-  group: 'block',
-  atom: true,
-  draggable: true,
-  addAttributes() {
-    return {
-      assetId: {
-        default: null,
-        parseHTML: (element: HTMLElement) => element.getAttribute('data-asset-id'),
-      },
-      alt: { default: '', parseHTML: (element: HTMLElement) => element.getAttribute('alt') ?? '' },
-    };
-  },
-  parseHTML() {
-    return [
-      {
-        tag: 'img[data-asset-id]',
-        getAttrs: (element: HTMLElement) =>
-          assetIdPattern.test(element.getAttribute('data-asset-id') ?? '') ? {} : false,
-      },
-    ];
-  },
-  renderHTML({ node }) {
-    return [
-      'img',
-      {
-        'data-asset-id': node.attrs.assetId,
-        src: assetUrl(String(node.attrs.assetId)),
-        alt: node.attrs.alt,
-      },
-    ];
-  },
-});
-
-const WritingKit = StarterKit.extend({
-  addExtensions() {
-    return (this.parent?.() ?? []).map((extension) => {
-      if (extension.name === 'link')
-        return extension.extend({
-          addAttributes() {
-            return {
-              href: {
-                default: null,
-                parseHTML: (element: HTMLElement) => element.getAttribute('href'),
-              },
-            };
-          },
-        });
-      if (extension.name === 'orderedList')
-        return extension.extend({
-          addAttributes() {
-            return {
-              start: {
-                default: 1,
-                parseHTML: (element: HTMLElement) =>
-                  element.hasAttribute('start') ? Number(element.getAttribute('start')) : 1,
-              },
-            };
-          },
-        });
-      return extension;
-    });
-  },
-});
-
-const blankArticle = (): ArticleInput => ({
-  title: '',
-  author: '',
-  digest: '',
-  sourceUrl: '',
-  coverId: null,
-  document: structuredClone(initialDocument),
-});
-const fields = (article: ArticleInput): ArticleInput => ({
-  title: article.title,
-  author: article.author,
-  digest: article.digest,
-  sourceUrl: article.sourceUrl,
-  coverId: article.coverId,
-  document: article.document,
-});
-const fingerprint = (value: ArticleInput) => JSON.stringify(fields(value));
-const isSafeLink = (href: string) => safeHttpUrl.safeParse(href).success;
-
-// Unknown structures are rejected as a whole, giving the writer a chance to paste plain text.
-function pasteProblem(html: string): string | null {
-  if (new TextEncoder().encode(html).byteLength > 2 * 1024 * 1024)
-    return '粘贴内容超过 2 MiB，请分段粘贴。';
-  const parsed = document.createElement('template');
-  parsed.innerHTML = html;
-  const allowed = new Set([
-    'P',
-    'DIV',
-    'SPAN',
-    'BR',
-    'H2',
-    'H3',
-    'STRONG',
-    'B',
-    'EM',
-    'I',
-    'S',
-    'STRIKE',
-    'DEL',
-    'U',
-    'UL',
-    'OL',
-    'LI',
-    'BLOCKQUOTE',
-    'PRE',
-    'CODE',
-    'HR',
-    'A',
-    'IMG',
-    'META',
-  ]);
-  const elements = [...parsed.content.querySelectorAll('*')];
-  if (elements.length > 5000) return '粘贴内容节点过多，请分段粘贴。';
-  for (const element of elements) {
-    if (element.tagName === 'IMG') {
-      const id = element.getAttribute('data-asset-id') ?? '';
-      const src = element.getAttribute('src');
-      if (!assetIdPattern.test(id) || src !== assetUrl(id))
-        return '粘贴内容含外链图片。请先将图片保存到本地，再用「正文图片」上传；本次粘贴未插入。';
-    }
-    if (!allowed.has(element.tagName))
-      return '粘贴内容含暂不支持的结构。请使用 Ctrl/Cmd + Shift + V 粘贴为纯文本，再进行排版。';
-    if ([...element.attributes].some((attribute) => /^on/i.test(attribute.name)))
-      return '粘贴内容含事件属性，未插入。请粘贴为纯文本。';
-    if (element.tagName === 'A' && !isSafeLink(element.getAttribute('href') ?? ''))
-      return '正文链接只支持不含凭据的 HTTP / HTTPS 地址，本次粘贴未插入。';
-    if (
-      element.tagName === 'OL' &&
-      element.hasAttribute('type') &&
-      element.getAttribute('type') !== '1'
-    )
-      return '当前只支持数字有序列表，请转换列表编号后重新粘贴，或粘贴为纯文本。';
-  }
-  return null;
-}
-
-function Toolbar({
-  editor,
-  disabled,
-  onImage,
-  onLink,
-}: {
-  editor: Editor | null;
-  disabled: boolean;
-  onImage: () => void;
-  onLink: () => void;
-}) {
-  const buttons: { label: string; text: string; active?: boolean; run: () => void }[] = [
-    {
-      label: '正文段落',
-      text: '正文',
-      active: editor?.isActive('paragraph'),
-      run: () => {
-        editor?.chain().focus().setParagraph().run();
-      },
-    },
-    {
-      label: '二级标题',
-      text: 'H2',
-      active: editor?.isActive('heading', { level: 2 }),
-      run: () => {
-        editor?.chain().focus().toggleHeading({ level: 2 }).run();
-      },
-    },
-    {
-      label: '三级标题',
-      text: 'H3',
-      active: editor?.isActive('heading', { level: 3 }),
-      run: () => {
-        editor?.chain().focus().toggleHeading({ level: 3 }).run();
-      },
-    },
-    {
-      label: '加粗',
-      text: 'B',
-      active: editor?.isActive('bold'),
-      run: () => {
-        editor?.chain().focus().toggleBold().run();
-      },
-    },
-    {
-      label: '斜体',
-      text: 'I',
-      active: editor?.isActive('italic'),
-      run: () => {
-        editor?.chain().focus().toggleItalic().run();
-      },
-    },
-    {
-      label: '删除线',
-      text: 'S̶',
-      active: editor?.isActive('strike'),
-      run: () => {
-        editor?.chain().focus().toggleStrike().run();
-      },
-    },
-    {
-      label: '下划线',
-      text: 'U̲',
-      active: editor?.isActive('underline'),
-      run: () => {
-        editor?.chain().focus().toggleUnderline().run();
-      },
-    },
-    {
-      label: '无序列表',
-      text: '• 列表',
-      active: editor?.isActive('bulletList'),
-      run: () => {
-        editor?.chain().focus().toggleBulletList().run();
-      },
-    },
-    {
-      label: '有序列表',
-      text: '1. 列表',
-      active: editor?.isActive('orderedList'),
-      run: () => {
-        editor?.chain().focus().toggleOrderedList().run();
-      },
-    },
-    {
-      label: '引用',
-      text: '引用',
-      active: editor?.isActive('blockquote'),
-      run: () => {
-        editor?.chain().focus().toggleBlockquote().run();
-      },
-    },
-    {
-      label: '行内代码',
-      text: '</>',
-      active: editor?.isActive('code'),
-      run: () => {
-        editor?.chain().focus().toggleCode().run();
-      },
-    },
-    {
-      label: '代码块',
-      text: '代码块',
-      active: editor?.isActive('codeBlock'),
-      run: () => {
-        editor?.chain().focus().toggleCodeBlock().run();
-      },
-    },
-    {
-      label: '分隔线',
-      text: '分隔线',
-      run: () => {
-        editor?.chain().focus().setHorizontalRule().run();
-      },
-    },
-    {
-      label: '换行',
-      text: '换行',
-      run: () => {
-        editor?.chain().focus().setHardBreak().run();
-      },
-    },
-    { label: '正文链接', text: '链接', active: editor?.isActive('link'), run: onLink },
-    { label: '正文图片', text: '图片', run: onImage },
-    {
-      label: '撤销',
-      text: '撤销',
-      run: () => {
-        editor?.chain().focus().undo().run();
-      },
-    },
-    {
-      label: '重做',
-      text: '重做',
-      run: () => {
-        editor?.chain().focus().redo().run();
-      },
-    },
-  ];
-  return (
-    <div className="editor-toolbar" role="group" aria-label="正文格式工具">
-      {buttons.map((button) => (
-        <Tooltip title={button.label} key={button.label}>
-          <button
-            type="button"
-            aria-label={button.label}
-            aria-pressed={button.active}
-            disabled={disabled || !editor}
-            className={button.active ? 'is-active' : ''}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={button.run}
-          >
-            {button.text}
-          </button>
-        </Tooltip>
-      ))}
-    </div>
-  );
-}
 
 export function ArticleEditor({
   id,
   onBack,
   onDirtyChange,
+  remoteWritesEnabled,
+  onInspectRecords,
 }: {
   id: string | null;
   onBack: () => void;
   onDirtyChange: (dirty: boolean) => void;
+  remoteWritesEnabled: boolean;
+  onInspectRecords: () => void;
 }) {
   const [article, setArticle] = useState<Article | null>(null);
   const [draft, setDraft] = useState<ArticleInput>(blankArticle);
@@ -342,25 +37,15 @@ export function ArticleEditor({
   const [notice, setNotice] = useState('');
   const [conflict, setConflict] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
-  const [link, setLink] = useState('');
-  const [linkError, setLinkError] = useState('');
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [history, setHistory] = useState<RevisionSummary[]>([]);
-  const [historyPage, setHistoryPage] = useState(1);
-  const [historyTotal, setHistoryTotal] = useState(0);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState('');
-  const [historicalRevision, setHistoricalRevision] = useState<Revision | null>(null);
-  const [previewSnapshot, setPreviewSnapshot] = useState<Article | Revision | null>(null);
-  const [preview, setPreview] = useState<ArticlePreview | null>(null);
-  const [previewTitle, setPreviewTitle] = useState('');
-  const [previewLoading, setPreviewLoading] = useState(false);
+  const [revisionActive, setRevisionActive] = useState(false);
+  const [deliveryActive, setDeliveryActive] = useState(false);
   const bodyFile = useRef<HTMLInputElement>(null);
   const coverFile = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
   const uploadHandler = useRef<(file: File, cover: boolean) => void>(() => undefined);
   const dirty = fingerprint(draft) !== baseline;
   const busy = saving || uploading;
+  const overlayActive = revisionActive || deliveryActive || linkOpen;
   const editor = useEditor({
     extensions: [
       WritingKit.configure({
@@ -455,8 +140,8 @@ export function ArticleEditor({
     return () => window.removeEventListener('beforeunload', beforeUnload);
   }, [dirty, busy]);
   useEffect(() => {
-    editor?.setEditable(!busy && !loading, false);
-  }, [editor, busy, loading]);
+    editor?.setEditable(!busy && !loading && !overlayActive, false);
+  }, [editor, busy, loading, overlayActive]);
   useEffect(() => {
     if (!id || !editor) return;
     const controller = new AbortController();
@@ -519,7 +204,7 @@ export function ArticleEditor({
   };
 
   async function save() {
-    if (!editor || busy || loading || (id && !article)) return;
+    if (!editor || busy || loading || overlayActive || (id && !article)) return;
     setError('');
     setNotice('');
     const parsed = articleInput.safeParse({ ...draft, document: editor.getJSON() });
@@ -582,54 +267,6 @@ export function ArticleEditor({
     }
   }
 
-  async function openHistory(page = 1) {
-    if (!article) return;
-    setHistoryOpen(true);
-    setHistoryLoading(true);
-    setHistoryError('');
-    setHistoryPage(page);
-    try {
-      const result = await api<Page<RevisionSummary>>(
-        `/articles/${article.id}/revisions?page=${page}&pageSize=20`,
-      );
-      setHistory(result.items);
-      setHistoryTotal(result.total);
-    } catch (failure) {
-      setHistoryError(errorMessage(failure));
-    } finally {
-      setHistoryLoading(false);
-    }
-  }
-
-  async function openPreview(revisionId?: string) {
-    if (!article || busy) return;
-    const savedArticle = article;
-    if (!revisionId && dirty) {
-      setNotice('当前有未保存修改，请先保存后再预览当前文章。');
-      return;
-    }
-    setError('');
-    setPreviewLoading(true);
-    try {
-      let snapshot: Article | Revision = savedArticle;
-      if (revisionId)
-        snapshot = await api<Revision>(`/articles/${savedArticle.id}/revisions/${revisionId}`);
-      const result = await api<ArticlePreview>(`/articles/${savedArticle.id}/preview`, {
-        method: 'POST',
-        ...jsonRequest({ revisionId: revisionId ?? savedArticle.revisionId }),
-      });
-      setHistoricalRevision(revisionId ? (snapshot as Revision) : null);
-      if (revisionId) setHistoryOpen(false);
-      setPreviewSnapshot(snapshot);
-      setPreviewTitle(snapshot.title);
-      setPreview(result);
-    } catch (failure) {
-      setError(errorMessage(failure));
-    } finally {
-      setPreviewLoading(false);
-    }
-  }
-
   const update = (key: keyof Omit<ArticleInput, 'document' | 'coverId'>, value: string) => {
     setDraft((current) => ({ ...current, [key]: value }));
     setNotice('');
@@ -680,22 +317,29 @@ export function ArticleEditor({
           <p className="secondary">明确保存，每次变化形成一份独立修订。</p>
         </div>
         <div className="article-actions">
-          <Button onClick={() => void openHistory()} disabled={!article || busy || loading}>
-            修订历史
-          </Button>
-          <Button
-            onClick={() => void openPreview()}
-            loading={previewLoading}
-            disabled={!article || busy || loading}
-          >
-            微信预览
-          </Button>
+          <ArticleRevisionActions
+            article={article}
+            dirty={dirty}
+            busy={busy || loading || deliveryActive || linkOpen}
+            onNotice={setNotice}
+            onError={setError}
+            onActivityChange={setRevisionActive}
+          />
+          <ArticleDelivery
+            article={article}
+            dirty={dirty}
+            busy={busy || loading || revisionActive || linkOpen}
+            remoteWritesEnabled={remoteWritesEnabled}
+            onNotice={setNotice}
+            onInspectRecords={onInspectRecords}
+            onActivityChange={setDeliveryActive}
+          />
           <Button
             type="primary"
             aria-label="保存文章"
             onClick={() => void save()}
             loading={saving}
-            disabled={busy || loading || Boolean(id && !article)}
+            disabled={busy || loading || overlayActive || Boolean(id && !article)}
           >
             保存文章
           </Button>
@@ -738,18 +382,16 @@ export function ArticleEditor({
                 id="article-title"
                 value={draft.title}
                 placeholder="未命名文章"
-                disabled={busy}
+                disabled={busy || overlayActive}
                 onChange={(event) => update('title', event.target.value)}
               />
             </div>
             <label className="body-label">正文</label>
-            <Toolbar
+            <ArticleToolbar
               editor={editor}
-              disabled={busy}
+              disabled={busy || overlayActive}
               onImage={() => bodyFile.current?.click()}
               onLink={() => {
-                setLink(String(editor?.getAttributes('link').href ?? ''));
-                setLinkError('');
                 setLinkOpen(true);
               }}
             />
@@ -758,72 +400,14 @@ export function ArticleEditor({
               支持二 / 三级标题、文字样式、列表、引用、代码和本地图片。外部格式使用统一排版。
             </div>
           </section>
-          <aside className="surface article-metadata" aria-label="文章信息">
-            <h2>文章信息</h2>
-            <p className="secondary">不完整的稿件也可以先保存。</p>
-            <div className="metadata-field">
-              <label htmlFor="article-author">作者</label>
-              <Input
-                id="article-author"
-                value={draft.author}
-                disabled={busy}
-                onChange={(event) => update('author', event.target.value)}
-              />
-            </div>
-            <div className="metadata-field">
-              <label htmlFor="article-digest">摘要</label>
-              <Input.TextArea
-                id="article-digest"
-                rows={4}
-                value={draft.digest}
-                disabled={busy}
-                onChange={(event) => update('digest', event.target.value)}
-              />
-            </div>
-            <div className="metadata-field">
-              <label htmlFor="article-source">原文链接</label>
-              <Input
-                id="article-source"
-                placeholder="https://"
-                value={draft.sourceUrl}
-                disabled={busy}
-                onChange={(event) => update('sourceUrl', event.target.value)}
-              />
-              <p className="form-note">仅支持 HTTP / HTTPS，正文外链在预览中显示为文字与网址。</p>
-            </div>
-            <div className="metadata-field">
-              <span className="field-label">文章封面</span>
-              {draft.coverId ? (
-                <img className="article-cover" src={assetUrl(draft.coverId)} alt="文章封面" />
-              ) : (
-                <div className="cover-empty">尚未选择封面</div>
-              )}
-              <div className="cover-actions">
-                <Button onClick={() => coverFile.current?.click()} disabled={busy}>
-                  {draft.coverId ? '更换封面' : '上传封面'}
-                </Button>
-                {draft.coverId && (
-                  <Button
-                    type="text"
-                    disabled={busy}
-                    onClick={() => setDraft((current) => ({ ...current, coverId: null }))}
-                  >
-                    移除封面
-                  </Button>
-                )}
-              </div>
-              <p className="form-note">
-                JPG / PNG，单张不超过 10 MiB、2000 万像素。图片读取需要登录。
-              </p>
-            </div>
-            {article && (
-              <p className="saved-at">
-                最近保存
-                <br />
-                <strong>{date(article.updatedAt)}</strong>
-              </p>
-            )}
-          </aside>
+          <ArticleMetadata
+            draft={draft}
+            article={article}
+            disabled={busy || overlayActive}
+            onChange={update}
+            onCover={() => coverFile.current?.click()}
+            onRemoveCover={() => setDraft((current) => ({ ...current, coverId: null }))}
+          />
         </div>
       )}
       <input
@@ -852,163 +436,7 @@ export function ArticleEditor({
           if (file) void upload(file, true);
         }}
       />
-      <Modal
-        open={linkOpen}
-        title="正文链接"
-        okText="应用链接"
-        cancelText="取消"
-        onCancel={() => setLinkOpen(false)}
-        onOk={() => {
-          if (!link.trim()) {
-            editor?.chain().focus().extendMarkRange('link').unsetLink().run();
-            setLinkOpen(false);
-            return;
-          }
-          if (!isSafeLink(link.trim())) {
-            setLinkError('请输入不含账号密码的 HTTP / HTTPS 网址。');
-            return;
-          }
-          if (editor?.state.selection.empty && !editor.isActive('link')) {
-            setLinkError('请先在正文中选中需要添加链接的文字。');
-            return;
-          }
-          editor?.chain().focus().extendMarkRange('link').setLink({ href: link.trim() }).run();
-          setLinkOpen(false);
-        }}
-      >
-        <label htmlFor="article-link">链接地址</label>
-        <Input
-          id="article-link"
-          value={link}
-          onChange={(event) => setLink(event.target.value)}
-          placeholder="https://"
-        />
-        <p className="form-note">先选中文字。留空可移除已有链接；预览显示文字与网址。</p>
-        {linkError && (
-          <p className="inline-error" role="alert">
-            {linkError}
-          </p>
-        )}
-      </Modal>
-      <Modal
-        open={historyOpen}
-        title="修订历史"
-        onCancel={() => setHistoryOpen(false)}
-        footer={null}
-        width={680}
-      >
-        <p className="secondary">查看已保存快照。后续编辑不会覆盖这些内容。</p>
-        {historyError && <Alert type="error" showIcon message={historyError} />}
-        {historyLoading ? (
-          <div className="loading-panel">
-            <Spin />
-          </div>
-        ) : (
-          <div className="revision-list">
-            {history.map((revision) => (
-              <div key={revision.id} className="revision-row">
-                <div>
-                  <strong>
-                    修订 v{revision.version}{' '}
-                    {revision.id === article?.revisionId && <Tag>当前修订</Tag>}
-                  </strong>
-                  <span className="revision-title">{revision.title}</span>
-                  <span className="secondary">{date(revision.createdAt)}</span>
-                </div>
-                <Button onClick={() => void openPreview(revision.id)} loading={previewLoading}>
-                  查看 v{revision.version}
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-        {historyTotal > 20 && (
-          <div className="history-pages">
-            <Button
-              disabled={historyPage <= 1 || historyLoading}
-              onClick={() => void openHistory(historyPage - 1)}
-            >
-              上一页
-            </Button>
-            <span>第 {historyPage} 页</span>
-            <Button
-              disabled={historyPage * 20 >= historyTotal || historyLoading}
-              onClick={() => void openHistory(historyPage + 1)}
-            >
-              下一页
-            </Button>
-          </div>
-        )}
-      </Modal>
-      <Modal
-        open={Boolean(preview)}
-        title={
-          historicalRevision
-            ? `历史修订 v${preview?.version} · 只读`
-            : `微信预览 · 修订 v${preview?.version}`
-        }
-        width={760}
-        footer={null}
-        onCancel={() => {
-          if (historicalRevision) setHistoryOpen(true);
-          setPreview(null);
-          setHistoricalRevision(null);
-        }}
-        className="article-preview-modal"
-      >
-        <p className="secondary">固定公众号排版的近似效果，最终以微信后台为准。</p>
-        {preview?.warnings.map((warning, index) => (
-          <Alert key={index} type="warning" showIcon message={warning} />
-        ))}
-        {previewSnapshot && (
-          <dl className="revision-metadata">
-            <div>
-              <dt>作者</dt>
-              <dd>{previewSnapshot.author || '未填写'}</dd>
-            </div>
-            <div>
-              <dt>摘要</dt>
-              <dd>{previewSnapshot.digest || '未填写'}</dd>
-            </div>
-            <div>
-              <dt>原文链接</dt>
-              <dd>{previewSnapshot.sourceUrl || '未填写'}</dd>
-            </div>
-            <div>
-              <dt>保存时间</dt>
-              <dd>
-                {date(
-                  'createdAt' in previewSnapshot
-                    ? previewSnapshot.createdAt
-                    : previewSnapshot.updatedAt,
-                )}
-              </dd>
-            </div>
-            {previewSnapshot.coverId && (
-              <div>
-                <dt>封面</dt>
-                <dd>
-                  <img
-                    src={assetUrl(previewSnapshot.coverId)}
-                    alt={historicalRevision ? '历史修订封面' : '预览封面'}
-                    className="history-cover"
-                  />
-                </dd>
-              </div>
-            )}
-          </dl>
-        )}
-        {preview && (
-          <div className="preview-paper">
-            <h2>{previewTitle}</h2>
-            <iframe
-              title="微信正文预览"
-              sandbox="allow-same-origin"
-              srcDoc={`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style>body{margin:0;padding:0 4px;font-family:system-ui,'Microsoft YaHei',sans-serif}img{max-width:100%}</style></head><body>${preview.html}</body></html>`}
-            />
-          </div>
-        )}
-      </Modal>
+      <ArticleLinkDialog open={linkOpen} editor={editor} onClose={() => setLinkOpen(false)} />
     </div>
   );
 }

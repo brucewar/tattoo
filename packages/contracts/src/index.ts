@@ -233,6 +233,28 @@ export const deliveryInput = z.object({
   revisionId: z.string().uuid(),
   accountId: z.string().uuid(),
 });
+export const deliveryCheckInput = deliveryInput.strict();
+export const deliverySubmissionInput = deliveryInput
+  .extend({ confirmed: z.literal(true) })
+  .strict();
+export type DeliverySubmissionInput = z.infer<typeof deliverySubmissionInput>;
+export type DeliveryCheck = {
+  revisionId: string;
+  version: number;
+  title: string;
+  savedAt: string;
+  account: { id: string; name: string; platform: Platform };
+  problems: string[];
+  warnings: string[];
+  limitsVerified: boolean;
+  canSubmit: boolean;
+  existingDelivery: {
+    id: string;
+    state: DeliveryState;
+    remoteId: string | null;
+    resultSource: string | null;
+  } | null;
+};
 export type ArticleInput = z.infer<typeof articleInput>;
 export type Article = ArticleInput & {
   id: string;
@@ -255,7 +277,7 @@ export type ArticlePreview = {
   renderVersion: string;
   html: string;
   warnings: string[];
-  platformLimitsVerified: false;
+  platformLimitsVerified: boolean;
 };
 export type Account = {
   id: string;

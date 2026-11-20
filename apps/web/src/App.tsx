@@ -147,7 +147,11 @@ export function App() {
         <main className="main-content">
           {logoutError && <Alert type="error" showIcon message={logoutError} />}
           {section === 'content' ? (
-            <Content onDirtyChange={setContentDirty} />
+            <Content
+              onDirtyChange={setContentDirty}
+              remoteWritesEnabled={Boolean(user.remoteWritesEnabled)}
+              onInspectRecords={() => navigate('records')}
+            />
           ) : section === 'accounts' ? (
             <Accounts
               remoteWritesEnabled={Boolean(user.remoteWritesEnabled)}
@@ -166,6 +170,7 @@ export function App() {
         maskClosable={false}
         keyboard={false}
         width={480}
+        zIndex={2000}
         destroyOnClose
       >
         <Login

@@ -4,7 +4,7 @@
 
 代码仓库：[brucewar/tattoo](https://github.com/brucewar/tattoo)。
 
-> 当前状态：**P3 内容编辑与本地验收已完成**。支持文章编辑、图片、不可变修订、冲突处理及公众号预览，保留 P2 的账号验证和固定测试草稿入口；普通文章投递在 P4，真实微信公众号验收未执行。
+> 当前状态：**P4 普通文章草稿投递的本地与模拟验收已完成**。支持编辑、图片、不可变修订、公众号预览，以及确认账号和修订后由后台存入微信草稿、查看结果和处理失败；真实微信公众号与目标 NAS 验收未执行。
 
 ## 设计与实施
 
@@ -23,7 +23,7 @@ cd tattoo
 
 将仓库克隆到自己选择的目录即可。
 
-开发与 Docker 验证步骤见 [开发说明](docs/DEVELOPMENT.md)，实际结果见 [P1 验证记录](docs/P1-VERIFICATION.md)、[P2 验证记录](docs/P2-VERIFICATION.md) 和 [P3 验证记录](docs/P3-VERIFICATION.md)。
+开发与 Docker 验证步骤见 [开发说明](docs/DEVELOPMENT.md)，实际结果见 [P1 验证记录](docs/P1-VERIFICATION.md)、[P2 验证记录](docs/P2-VERIFICATION.md)、[P3 验证记录](docs/P3-VERIFICATION.md) 和 [P4 验证记录](docs/P4-VERIFICATION.md)。
 
 ## 本地启动
 
@@ -39,7 +39,7 @@ docker compose up -d --build --wait
 
 ## 第一阶段范围
 
-管理员登录、公众号配置与接口验证、文章和修订、图片上传、公众号排版预览、后台存草稿、投递记录、Docker Compose。当前优先完成普通文章到微信草稿的闭环。
+管理员登录、公众号配置与接口验证、文章和修订、图片上传、公众号排版预览、后台存草稿、投递记录、Docker Compose。普通文章到微信草稿的实现与本地模拟闭环已完成，部署恢复和真实平台验收按 P5 继续推进。
 
 微信闭环之后推进资料获取、AI 创作与配图，以及知乎内容导出、小红书文案和图片导出；这些能力属于整体目标，尚未实现。自动选题、周期生成和多平台真实发表不在本阶段范围，后续需求另行确认。
 

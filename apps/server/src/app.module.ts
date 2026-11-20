@@ -1,5 +1,4 @@
-import { Controller, Get, Module, ServiceUnavailableException } from '@nestjs/common';
-import { Database } from './database';
+import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { RuntimeModule } from './runtime.module';
 import { IdentityModule } from './identity/identity.module';
@@ -8,26 +7,7 @@ import { AssetsModule } from './assets/assets.module';
 import { PublishingModule } from './publishing/publishing.module';
 import { ContentModule } from './content/content.module';
 import { CsrfGuard } from './csrf.guard';
-
-@Controller('health')
-class HealthController {
-  constructor(private readonly database: Database) {}
-
-  @Get('live')
-  live() {
-    return { data: { status: 'ok' } };
-  }
-
-  @Get('ready')
-  async ready() {
-    try {
-      await this.database.$queryRaw`SELECT 1`;
-      return { data: { status: 'ready' } };
-    } catch {
-      throw new ServiceUnavailableException('数据库暂不可用');
-    }
-  }
-}
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
