@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type APIResponse, type Page, type Route } from '@playwright/test';
 
 // These tests must target the real Tattoo API wired to an isolated mock WeChat server.
-// They never intercept browser requests or use a real WeChat credential.
+// The login regression delays one real API response; it never fabricates business results.
+// No test uses a real WeChat credential.
 test.skip(
   process.env.TATTOO_E2E_TEST_MODE !== '1' ||
     !process.env.TATTOO_E2E_EMAIL ||
@@ -24,7 +25,58 @@ test('错误登录被拒绝，正确登录后的会话 Cookie 受保护，退出
   await page.goto('/');
   await page.getByLabel('管理员邮箱', { exact: true }).fill(process.env.TATTOO_E2E_EMAIL!);
   await page.getByLabel('密码', { exact: true }).fill('wrong-e2e-password');
-  await page.getByRole('button', { name: '登录', exact: true }).click();
+  let releaseResponse!: () => void;
+  let responseReady!: (response: APIResponse) => void;
+  let responseFailed!: (error: unknown) => void;
+  const responseHeld = new Promise<void>((resolve) => {
+    releaseResponse = resolve;
+  });
+  const realResponse = new Promise<APIResponse>((resolve, reject) => {
+    responseReady = resolve;
+    responseFailed = reject;
+  });
+  let inFlight: Promise<void> | undefined;
+  const holdFirstLogin = (route: Route) => {
+    inFlight = (async () => {
+      try {
+        const response = await route.fetch();
+        responseReady(response);
+        await responseHeld;
+        await route.fulfill({ response });
+      } catch (error) {
+        responseFailed(error);
+        throw error;
+      }
+    })();
+    return inFlight;
+  };
+  await page.route('**/api/v1/auth/login', holdFirstLogin);
+  let assertionFailed = false;
+  try {
+    await page.getByRole('button', { name: '登录', exact: true }).click();
+    expect((await realResponse).status()).toBe(401);
+    await expect(page.getByRole('img', { name: 'loading', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '登录', exact: true })).toBeVisible({
+      timeout: 3000,
+    });
+  } catch (error) {
+    assertionFailed = true;
+    throw error;
+  } finally {
+    releaseResponse();
+    let cleanupError: unknown;
+    try {
+      await inFlight;
+    } catch (error) {
+      cleanupError = error;
+    }
+    try {
+      await page.unroute('**/api/v1/auth/login', holdFirstLogin);
+    } catch (error) {
+      cleanupError ??= error;
+    }
+    if (!assertionFailed && cleanupError) throw cleanupError;
+  }
   await expect(page.getByRole('alert')).toBeVisible();
   expect((await page.request.get('/api/v1/auth/me')).status()).toBe(401);
   await page.getByLabel('密码', { exact: true }).fill(process.env.TATTOO_E2E_PASSWORD!);

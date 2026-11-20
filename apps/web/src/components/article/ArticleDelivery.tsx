@@ -277,6 +277,7 @@ export function ArticleDelivery({
                 id="delivery-account"
                 aria-label="目标公众号"
                 virtual={false}
+                getPopupContainer={(trigger) => trigger.parentElement ?? trigger}
                 placeholder="请选择公众号"
                 value={accountId}
                 loading={accountsLoading}

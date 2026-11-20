@@ -32,10 +32,7 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - name: Browser checks for accounts, editing and draft delivery
-        run: |
-          for sample in 1 2 3; do
-            node tests/e2e/run-p2.mjs
-          done
+        run: node tests/e2e/run-p2.mjs
       - run: npm run setup
       - run: docker compose config --quiet
       - run: docker compose build

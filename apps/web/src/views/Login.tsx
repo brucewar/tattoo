@@ -74,7 +74,14 @@ export function Login({
             maxLength={256}
           />
         </Form.Item>
-        <Button block type="primary" htmlType="submit" loading={pending}>
+        <Button
+          block
+          type="primary"
+          htmlType="submit"
+          aria-label="登录"
+          aria-busy={pending}
+          loading={pending}
+        >
           登录
         </Button>
       </Form>

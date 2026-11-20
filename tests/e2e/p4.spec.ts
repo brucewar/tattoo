@@ -278,68 +278,55 @@ test.describe('窄屏投递检查', () => {
     await page.getByRole('button', { name: '新建文章', exact: true }).click();
     await save(page);
     const before = await audit();
-    await page.getByRole('button', { name: '存入微信草稿', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: '存入微信草稿', exact: true });
-    await dialog.getByRole('combobox', { name: '目标公众号', exact: true }).click();
-    await page.getByRole('option', { name: target.name, exact: true }).click();
-    await expect(dialog.getByText('请上传文章封面', { exact: true })).toBeVisible();
-    await expect(dialog.getByText('正文不能为空', { exact: true })).toBeVisible();
-    await expect(
-      dialog.getByRole('button', { name: '确认存入微信草稿', exact: true }),
-    ).toBeDisabled();
-    const submit = dialog.getByRole('button', { name: '确认存入微信草稿', exact: true });
-    await submit.scrollIntoViewIfNeeded();
-    await expect(submit).toBeVisible();
-    const size = await page.evaluate(() => ({
-      width: document.documentElement.clientWidth,
-      scroll: document.documentElement.scrollWidth,
-    }));
-    if (size.scroll > size.width) {
-      const boundary = await page.evaluate(() => {
-        const width = document.documentElement.clientWidth;
-        const describe = (element: Element) => {
-          const rect = element.getBoundingClientRect();
-          const css = getComputedStyle(element);
-          return {
-            tag: element.tagName,
-            classes: element.getAttribute('class'),
-            left: rect.left,
-            right: rect.right,
-            width: rect.width,
-            client: element.clientWidth,
-            scroll: element.scrollWidth,
-            position: css.position,
-            display: css.display,
-            transform: css.transform,
-            origin: css.transformOrigin,
-          };
+    await page.evaluate(() => {
+      const host = window as Window & {
+        __tattooDeliveryWidth?: { frame: number; maximum: number };
+      };
+      const state = { frame: 0, maximum: document.documentElement.scrollWidth };
+      host.__tattooDeliveryWidth = state;
+      const observe = () => {
+        state.maximum = Math.max(state.maximum, document.documentElement.scrollWidth);
+        state.frame = requestAnimationFrame(observe);
+      };
+      state.frame = requestAnimationFrame(observe);
+    });
+    const stopObservation = () =>
+      page.evaluate(() => {
+        const host = window as Window & {
+          __tattooDeliveryWidth?: { frame: number; maximum: number };
         };
+        const state = host.__tattooDeliveryWidth;
+        if (state) cancelAnimationFrame(state.frame);
+        delete host.__tattooDeliveryWidth;
+        const scroll = document.documentElement.scrollWidth;
         return {
-          now: document.documentElement.scrollWidth,
-          x: window.scrollX,
-          browser: navigator.userAgent,
-          outside: [...document.querySelectorAll('*')]
-            .filter((element) => {
-              const rect = element.getBoundingClientRect();
-              return rect.width > 0 && (rect.right > width + 1 || rect.left < -1);
-            })
-            .slice(0, 12)
-            .map(describe),
-          overlays: [...document.querySelectorAll('.ant-modal, .ant-select-dropdown')].map(
-            describe,
-          ),
+          width: document.documentElement.clientWidth,
+          scroll,
+          maximum: Math.max(state?.maximum ?? scroll, scroll),
         };
       });
-      await page.waitForTimeout(350);
-      const settled = await page.evaluate(() => document.documentElement.scrollWidth);
-      expect(
-        size.scroll,
-        '移动端布局边界：' + JSON.stringify({ ...size, boundary, settled }),
-      ).toBeLessThanOrEqual(size.width);
+    try {
+      await page.getByRole('button', { name: '存入微信草稿', exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: '存入微信草稿', exact: true });
+      await dialog.getByRole('combobox', { name: '目标公众号', exact: true }).click();
+      await page.getByRole('option', { name: target.name, exact: true }).click();
+      await expect(dialog.getByText('请上传文章封面', { exact: true })).toBeVisible();
+      await expect(dialog.getByText('正文不能为空', { exact: true })).toBeVisible();
+      const submit = dialog.getByRole('button', { name: '确认存入微信草稿', exact: true });
+      await expect(submit).toBeDisabled();
+      await submit.scrollIntoViewIfNeeded();
+      await expect(submit).toBeVisible();
+      const size = await stopObservation();
+      expect(size.scroll).toBeLessThanOrEqual(size.width);
+      expect(size.maximum).toBeLessThanOrEqual(390);
+      const after = await audit();
+      expect(after.calls).toEqual(before.calls);
+      await page.screenshot({
+        path: testInfo.outputPath('p4-preflight-mobile.png'),
+        fullPage: true,
+      });
+    } finally {
+      await stopObservation().catch(() => undefined);
     }
-    expect(size.scroll).toBeLessThanOrEqual(size.width);
-    const after = await audit();
-    expect(after.calls).toEqual(before.calls);
-    await page.screenshot({ path: testInfo.outputPath('p4-preflight-mobile.png'), fullPage: true });
   });
 });
