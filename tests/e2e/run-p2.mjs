@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
-import { mkdtemp, readdir, readFile, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, readdir, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -50,6 +50,55 @@ function redact(value) {
   let result = value;
   for (const secret of secrets) result = result.replaceAll(secret, '[redacted]');
   return result;
+}
+
+function annotationText(value, property = false) {
+  let escaped = value.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+  if (property) escaped = escaped.replaceAll(':', '%3A').replaceAll(',', '%2C');
+  return escaped;
+}
+
+function failureNotice(title, value) {
+  console.info(`::notice title=${annotationText(title, true)}::${annotationText(redact(value))}`);
+}
+
+async function publishFailureContexts() {
+  const directory = join(root, 'test-results');
+  try {
+    const metadata = await lstat(directory);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) return;
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+  let published = 0;
+  async function visit(path) {
+    let entries;
+    try {
+      entries = await readdir(path, { withFileTypes: true });
+    } catch (error) {
+      if (error.code === 'ENOENT') return;
+      throw error;
+    }
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (published >= 3) return;
+      if (entry.isSymbolicLink()) continue;
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) await visit(child);
+      else if (entry.isFile() && entry.name === 'error-context.md') {
+        let context;
+        try {
+          context = await readFile(child, 'utf8');
+        } catch (error) {
+          if (error.code === 'ENOENT') continue;
+          throw error;
+        }
+        published++;
+        failureNotice(`Tattoo browser failure ARIA ${published}`, redact(context).slice(0, 6000));
+      }
+    }
+  }
+  await visit(directory);
 }
 
 async function port() {
@@ -328,8 +377,22 @@ try {
 } catch (error) {
   failed = true;
   primaryError = error;
-  for (const entry of logs.values())
-    if (entry.name !== 'Playwright') console.error(`${entry.name} 日志：${redact(entry.text)}`);
+  for (const entry of logs.values()) {
+    if (entry.name === 'Playwright') continue;
+    if (process.env.GITHUB_ACTIONS === 'true')
+      failureNotice(
+        `Tattoo ${entry.name} log tail`,
+        redact(entry.text).slice(entry.name === 'Vite' ? -8000 : -2000),
+      );
+    else console.error(`${entry.name} 日志：${redact(entry.text)}`);
+  }
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    try {
+      await publishFailureContexts();
+    } catch {
+      failureNotice('Tattoo browser diagnostics', '无法读取失败页面快照，原测试错误保持不变');
+    }
+  }
 } finally {
   for (const child of [...children].reverse())
     await cleanup(`停止 ${logs.get(child).name}`, () => stop(child));
