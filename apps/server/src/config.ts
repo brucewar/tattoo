@@ -1,5 +1,9 @@
-import 'dotenv/config';
+import { config as readEnvironment } from 'dotenv';
+import { resolve } from 'node:path';
 import { z } from 'zod';
+
+const repositoryRoot = resolve(__dirname, '../../..');
+readEnvironment({ path: resolve(repositoryRoot, '.env') });
 
 const flag = z.enum(['true', 'false']).transform((value) => value === 'true');
 
@@ -24,7 +28,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         (value) => (value === '' ? undefined : value),
         z.string().min(12).max(256).optional(),
       ),
-      STORAGE_PATH: z.string().default('./data/assets'),
+      STORAGE_PATH: z.string().min(1).default('./data/assets'),
       PORT: z.coerce.number().int().min(1).max(65535).default(3000),
       COOKIE_SECURE: flag.optional(),
       WECHAT_API_BASE: z.string().url().default('https://api.weixin.qq.com'),
@@ -57,7 +61,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   }
   const secure = config.COOKIE_SECURE ?? origin.protocol === 'https:';
   if (origin.protocol === 'https:' && !secure) throw new Error('HTTPS 环境必须启用 Secure Cookie');
-  return { ...config, APP_ORIGIN: origin.origin, COOKIE_SECURE: secure };
+  return {
+    ...config,
+    APP_ORIGIN: origin.origin,
+    COOKIE_SECURE: secure,
+    STORAGE_PATH: resolve(repositoryRoot, config.STORAGE_PATH),
+  };
 }
 
 export type Config = ReturnType<typeof loadConfig>;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../../apps/server/src/config';
+import { resolve } from 'node:path';
 
 const valid = {
   DATABASE_URL: 'postgresql://tattoo:test@localhost/tattoo_test',
@@ -7,6 +8,11 @@ const valid = {
 };
 
 describe('部署配置', () => {
+  it('相对素材路径固定在仓库根目录，不依赖 workspace 启动目录', () => {
+    expect(loadConfig({ ...valid, STORAGE_PATH: './data/assets' }).STORAGE_PATH).toBe(
+      resolve(__dirname, '../../data/assets'),
+    );
+  });
   it('没有加密主密钥时拒绝启动，并且错误不泄漏其他配置值', () => {
     expect(() =>
       loadConfig({ DATABASE_URL: 'postgresql://tattoo:private-password@localhost/db' }),

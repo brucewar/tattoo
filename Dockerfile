@@ -21,6 +21,7 @@ COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/apps/server ./apps/server
 COPY --from=build /app/packages/contracts ./packages/contracts
 COPY --from=build /app/scripts/start-api.mjs ./scripts/start-api.mjs
+COPY --from=build /app/scripts/reset-admin.mjs ./scripts/reset-admin.mjs
 RUN mkdir -p /data/assets && chown node:node /data/assets
 USER node
 CMD ["node", "scripts/start-api.mjs"]

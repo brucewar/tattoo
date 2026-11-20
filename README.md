@@ -4,7 +4,7 @@
 
 代码仓库：[brucewar/tattoo](https://github.com/brucewar/tattoo)。
 
-> 当前状态：**SPEC / PLAN 已确认，P1 工程基础已完成**。登录、编辑与投递等业务功能尚待实现，尚未通过真实微信公众号验收。
+> 当前状态：**P2 本地功能与模拟验收已完成**。可登录、配置公众号、只读验证并显式创建固定测试草稿；完整文章编辑与投递仍在后续阶段，真实微信公众号验收未执行。
 
 ## 设计与实施
 
@@ -23,7 +23,19 @@ cd tattoo
 
 将仓库克隆到自己选择的目录即可。
 
-开发与 Docker 验证步骤见 [开发说明](docs/DEVELOPMENT.md)，实际结果见 [P1 验证记录](docs/P1-VERIFICATION.md)。
+开发与 Docker 验证步骤见 [开发说明](docs/DEVELOPMENT.md)，实际结果见 [P1 验证记录](docs/P1-VERIFICATION.md) 和 [P2 验证记录](docs/P2-VERIFICATION.md)。
+
+## 本地启动
+
+需要 Node.js 22（至少 22.15）和 Docker Compose。
+
+```bash
+npm ci
+npm run setup
+docker compose up -d --build --wait
+```
+
+配置文件已存在时跳过 `setup`，避免覆盖密钥。启动后访问 `http://localhost:8080`，使用本机 `.env` 的管理员配置登录。AppID/AppSecret 在账号设置页填写；创建测试草稿还需显式启用远程写入，步骤见开发说明。
 
 ## 第一阶段范围
 

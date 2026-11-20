@@ -9,6 +9,14 @@ const env = { ...process.env, DATABASE_URL: process.env.TEST_DATABASE_URL };
 for (const args of [
   [
     'node_modules/prisma/build/index.js',
+    'generate',
+    '--schema',
+    'apps/server/prisma/schema.prisma',
+  ],
+  ['node_modules/typescript/bin/tsc', '-p', 'packages/contracts/tsconfig.json'],
+  ['node_modules/typescript/bin/tsc', '-p', 'apps/server/tsconfig.json'],
+  [
+    'node_modules/prisma/build/index.js',
     'migrate',
     'deploy',
     '--schema',

@@ -43,9 +43,45 @@ docker compose up -d --wait
 
 配置文件已存在时跳过 `setup`。默认访问 `http://localhost:8080`；局域网访问需将 `.env` 的 `APP_ORIGIN` 改为实际访问来源，包括端口。API 与 Worker 共享应用镜像，只有 web 对宿主开放端口。API 在启动前执行 `prisma migrate deploy`，失败则不启动 HTTP 服务；Worker 等待 API 就绪后启动。数据库与图片使用命名卷。
 
-当前 P1 只验证工程入口、健康检查和单 Worker 执行权，不表示登录、编辑或微信投递已完成。初始密码会在 P2 管理员初始化功能中使用，不能把启动页视为业务验收。
+当前已实现登录、账号设置、只读接口验证及固定测试草稿投递。完整文章编辑与投递仍在 P3/P4，不能将模拟服务通过解释为真实微信权限通过。应用会固定读取仓库根目录的 `.env`，相对素材路径也以仓库根目录解析，因此从 workspace 启动 API/Worker 时与 Docker 的配置规则一致。
 
 镜像构建完成后，可运行 `node scripts/verify-foundation.mjs` 执行隔离部署验证。它使用固定的 `tattoo-p1-smoke` Compose 项目和 18080 端口，验证健康检查、启动失败门槛、Worker 互斥和容器重建持久化；结束后停止测试容器，保留隔离测试卷用于排查。不要将该项目名用于真实部署。
+
+## 登录与公众号接入
+
+首次启动前在本机 `.env` 中设置 `ADMIN_EMAIL`，使用生成的 `ADMIN_PASSWORD` 登录。已有管理员不会被后续启动覆盖，初始化完成后可以移除 `ADMIN_PASSWORD`。会话在退出、过期或密码重置后失效。
+
+在“账号设置”添加 AppID 和 AppSecret。密钥仅通过本机页面提交，后端加密保存，后续读取不返回明文；编辑时留空表示保留原密钥。AppID 创建后不可修改，轮换 AppSecret 会清空 token 缓存和已验证能力。
+
+“只读验证”仅获取 token 和草稿计数，不上传封面，不创建草稿，也不会将“新增草稿”标记为已验证。40164 时按微信报告的真实出口 IP 配置白名单。账号实际权限和现行平台限制仍需参照 [微信核验记录](WECHAT-API.md) 在用户环境复核。
+
+## 显式创建测试草稿
+
+1. 将 `.env` 中 `REMOTE_WRITES_ENABLED` 改为 `true`，执行 `docker compose up -d --force-recreate api worker web` 使配置生效。
+2. 在账号设置中选择公众号，上传 JPG/PNG 封面，确认将产生远程素材及草稿后发起测试。
+3. 系统创建持久任务，Worker 在后台上传封面并创建固定测试文章；重复点击或网络重试沿用同一请求标识。
+4. 在投递详情查看结果与远程 ID，并在微信后台确认草稿实际可见。测试素材与草稿由用户按需手动清理，系统不自动删除。
+
+连接中断、无法解析响应或危险阶段的进程重启会进入“结果待核对”，不会自动重复提交。先执行 `docker compose stop worker` 并确认旧 Worker 已结束，再在微信后台检查。人工核对需填写说明、确认已停止 Worker；服务端同时检查全局执行权和账号锁。确认已创建可以没有远程 ID，但结果明确标为“人工确认”，不会冒充接口验证。确认未创建后另行显式重试，最后执行 `docker compose up -d worker`。
+
+## 管理员密码恢复
+
+运行容器内的 `scripts/reset-admin.mjs`，通过临时环境变量提供新密码。不要把密码作为命令行参数或提交到配置示例。PowerShell 示例：
+
+```powershell
+$tattooNewPassword = Read-Host '新管理员密码' -AsSecureString
+$env:TATTOO_NEW_PASSWORD = [System.Net.NetworkCredential]::new('', $tattooNewPassword).Password
+docker compose exec -T -e TATTOO_NEW_PASSWORD api node scripts/reset-admin.mjs
+Remove-Item Env:TATTOO_NEW_PASSWORD
+```
+
+重置会原子撤销全部旧会话；重复启动不会把密码改回初始配置。本地源码方式先构建后执行 `node scripts/reset-admin.mjs`，同样从环境变量读取新密码。
+
+## 浏览器验证
+
+数据库测试容器就绪且应用已构建后，设置与集成测试相同的 `TEST_DATABASE_URL`，执行 `node tests/e2e/run-p2.mjs`。它创建独立数据库 schema，启动真实 API、Worker、Vite 和本地模拟微信服务，使用 Playwright 验证登录、账号配置、封面上传、测试草稿和窄屏布局；结束后清理自有进程和测试数据。
+
+首次使用可运行 `npx playwright install chromium` 安装与当前锁文件匹配的浏览器；如使用已有浏览器，可通过 `TATTOO_E2E_BROWSER_EXECUTABLE` 指定可执行文件，不将本机路径写进仓库。在 Windows 上，应先停止本项目 API/Worker 子进程，再执行需要重新生成 Prisma Client 的构建，避免引擎 DLL 被占用。
 
 ## 持久化与后续恢复
 

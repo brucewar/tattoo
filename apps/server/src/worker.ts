@@ -1,22 +1,32 @@
+import 'reflect-metadata';
+import { Module, type INestApplicationContext } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
 import { Client } from 'pg';
 import { writeFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { loadConfig } from './config';
+import { RuntimeModule } from './runtime.module';
+import { PublishingModule, PublishingService, WORKER_LOCK } from './publishing/publishing.module';
 
-const workerLock = 8472901;
 const heartbeat = join(tmpdir(), 'tattoo-worker-health');
+
+@Module({ imports: [RuntimeModule, PublishingModule] })
+class WorkerModule {}
 
 async function main() {
   const config = loadConfig();
   const client = new Client({
     connectionString: config.DATABASE_URL,
     connectionTimeoutMillis: 10000,
+    query_timeout: 10000,
   });
   let stopping = false;
   let connectionError = false;
   let ownsLock = false;
+  let application: INestApplicationContext | undefined;
+  let timer: ReturnType<typeof setInterval> | undefined;
   process.once('SIGTERM', () => {
     stopping = true;
   });
@@ -31,19 +41,48 @@ async function main() {
   try {
     const lock = await client.query<{ acquired: boolean }>(
       'SELECT pg_try_advisory_lock($1) AS acquired',
-      [workerLock],
+      [WORKER_LOCK],
     );
     if (!lock.rows[0]?.acquired) throw new Error('另一个 Worker 正在运行');
     ownsLock = true;
-    console.info('Tattoo Worker 已连接数据库（P1：任务执行将在 P2 接入）');
-    while (!stopping) {
+    application = await NestFactory.createApplicationContext(WorkerModule, {
+      logger: ['warn', 'error'],
+    });
+    const publishing = application.get(PublishingService);
+    const assertActive = async () => {
+      if (stopping || connectionError || !ownsLock) throw new Error('Worker 执行权已停止');
       await client.query('SELECT 1');
-      await writeFile(heartbeat, String(Date.now()), { mode: 0o600 });
-      await setTimeout(5000);
+      if (stopping || connectionError) throw new Error('Worker 执行权已停止');
+    };
+    await publishing.recover();
+    await writeFile(heartbeat, String(Date.now()), { mode: 0o600 });
+    let refreshing = false;
+    timer = setInterval(() => {
+      if (refreshing || stopping) return;
+      refreshing = true;
+      void assertActive()
+        .then(() => writeFile(heartbeat, String(Date.now()), { mode: 0o600 }))
+        .catch(() => {
+          connectionError = true;
+          stopping = true;
+        })
+        .finally(() => {
+          refreshing = false;
+        });
+    }, 5000);
+    console.info(
+      `Tattoo Worker 已就绪，远程写入${config.REMOTE_WRITES_ENABLED ? '已启用' : '已暂停'}`,
+    );
+    while (!stopping) {
+      await assertActive();
+      const processed = await publishing.processNext(assertActive);
+      if (!processed) await setTimeout(1000);
     }
     if (connectionError) throw new Error('执行权连接中断');
   } finally {
+    if (timer) clearInterval(timer);
     if (ownsLock) await unlink(heartbeat).catch(() => undefined);
+    await application?.close().catch(() => undefined);
     await client.end().catch(() => undefined);
   }
 }

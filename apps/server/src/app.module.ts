@@ -1,5 +1,12 @@
 import { Controller, Get, Module, ServiceUnavailableException } from '@nestjs/common';
 import { Database } from './database';
+import { APP_GUARD } from '@nestjs/core';
+import { RuntimeModule } from './runtime.module';
+import { IdentityModule } from './identity/identity.module';
+import { AccountsModule } from './accounts/accounts.module';
+import { AssetsModule } from './assets/assets.module';
+import { PublishingModule } from './publishing/publishing.module';
+import { CsrfGuard } from './csrf.guard';
 
 @Controller('health')
 class HealthController {
@@ -21,5 +28,9 @@ class HealthController {
   }
 }
 
-@Module({ providers: [Database], controllers: [HealthController] })
+@Module({
+  imports: [RuntimeModule, IdentityModule, AccountsModule, AssetsModule, PublishingModule],
+  providers: [{ provide: APP_GUARD, useClass: CsrfGuard }],
+  controllers: [HealthController],
+})
 export class AppModule {}
