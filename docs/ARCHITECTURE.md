@@ -61,14 +61,14 @@ Worker → same application use case          → concrete adapters
 
 人工确认记录来源、操作者、时间、说明及可选远程 ID；人工成功和 API 成功在界面区分。映射命中但被微信明确判无效时，仅失效该账号该用途映射；能证明新增草稿未成功后才允许重试。素材上传结果丢失可能留下孤立素材，首版不自动清理。
 
-| 当前状态 | 允许的后续处理 |
-| --- | --- |
-| QUEUED | Worker 原子认领为 RUNNING；重复提交返回原任务 |
-| RUNNING（提交前） | 完成准备后进入危险阶段；可证明无草稿写入的故障记 FAILED，进程中断可恢复 |
-| RUNNING（危险阶段） | 明确成功为 SUCCEEDED；能证明未创建为 FAILED；其他结果为 UNCERTAIN |
-| FAILED | 用户显式重试，在同一 Delivery 下新增执行记录并回到 QUEUED |
-| UNCERTAIN | 确认旧执行者停止后，人工确认已创建为 SUCCEEDED，确认未创建为 FAILED；重试另行显式触发 |
-| SUCCEEDED | 终态，重复请求返回原结果；新修订才新建投递 |
+| 当前状态            | 允许的后续处理                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| QUEUED              | Worker 原子认领为 RUNNING；重复提交返回原任务                                         |
+| RUNNING（提交前）   | 完成准备后进入危险阶段；可证明无草稿写入的故障记 FAILED，进程中断可恢复               |
+| RUNNING（危险阶段） | 明确成功为 SUCCEEDED；能证明未创建为 FAILED；其他结果为 UNCERTAIN                     |
+| FAILED              | 用户显式重试，在同一 Delivery 下新增执行记录并回到 QUEUED                             |
+| UNCERTAIN           | 确认旧执行者停止后，人工确认已创建为 SUCCEEDED，确认未创建为 FAILED；重试另行显式触发 |
+| SUCCEEDED           | 终态，重复请求返回原结果；新修订才新建投递                                            |
 
 每次重试使用新执行标识；清理本次阶段标记时保留旧执行历史，旧执行标识不能更新新执行结果。
 
@@ -76,21 +76,21 @@ Worker → same application use case          → concrete adapters
 
 统一前缀 `/api/v1`；成功响应与错误响应均有稳定结构。错误包含 `code`、用户可读 `message`、可选 `details`，不返回堆栈或请求密钥。变更输入由共享契约验证。
 
-| 接口 | 用途 |
-| --- | --- |
-| POST /auth/login、POST /auth/logout、GET /auth/me | 登录与会话 |
-| GET/POST /accounts、PATCH /accounts/:id | 账号管理 |
-| POST /accounts/:id/verify | 只读验证 |
-| POST /accounts/:id/test-draft | 显式创建测试草稿 |
-| GET/POST /articles、GET/PATCH /articles/:id | 稿件与乐观锁保存 |
-| GET /articles/:id/revisions | 历史修订 |
-| GET /articles/:id/revisions/:revisionId | 单条历史快照，校验归属 |
-| POST /assets、GET /assets/:id | 本地素材上传和访问 |
-| POST /articles/:id/preview | 基于明确修订 ID、无远程副作用的排版预览 |
-| POST /deliveries、GET /deliveries、GET /deliveries/:id | 提交与查询 |
-| POST /deliveries/:id/retry | 明确失败后的重试 |
-| POST /deliveries/:id/resolve | 不确定结果的人工核对 |
-| GET /health/live、GET /health/ready | 存活与依赖就绪检查 |
+| 接口                                                   | 用途                                    |
+| ------------------------------------------------------ | --------------------------------------- |
+| POST /auth/login、POST /auth/logout、GET /auth/me      | 登录与会话                              |
+| GET/POST /accounts、PATCH /accounts/:id                | 账号管理                                |
+| POST /accounts/:id/verify                              | 只读验证                                |
+| POST /accounts/:id/test-draft                          | 显式创建测试草稿                        |
+| GET/POST /articles、GET/PATCH /articles/:id            | 稿件与乐观锁保存                        |
+| GET /articles/:id/revisions                            | 历史修订                                |
+| GET /articles/:id/revisions/:revisionId                | 单条历史快照，校验归属                  |
+| POST /assets、GET /assets/:id                          | 本地素材上传和访问                      |
+| POST /articles/:id/preview                             | 基于明确修订 ID、无远程副作用的排版预览 |
+| POST /deliveries、GET /deliveries、GET /deliveries/:id | 提交与查询                              |
+| POST /deliveries/:id/retry                             | 明确失败后的重试                        |
+| POST /deliveries/:id/resolve                           | 不确定结果的人工核对                    |
+| GET /health/live、GET /health/ready                    | 存活与依赖就绪检查                      |
 
 列表分页。前端轮询任务状态即可，第一阶段不增加 WebSocket/SSE 复杂度。保存允许不完整稿件，但始终执行结构/安全校验；投递只接受明确的已保存 revisionId。测试草稿入口接受幂等请求标识，服务端生成测试修订，不能绕过 Delivery 唯一约束。素材路由统一为 `/api/v1/assets/:id`，不沿用脚手架的 `/api/assets/:id`。
 
@@ -130,6 +130,8 @@ web:8080 → api:3000 → postgres:5432
 
 首版采用停机一致备份：停止写入和 Worker、确认无活动外部请求后备份数据库和素材，主密钥另行备份。恢复实例默认不开启远程写入，旧 QUEUED/RUNNING 必须先核对再显式放行；UNCERTAIN 不因恢复而变为可重试。镜像升级固定版本，迁移失败阻止启动；不兼容迁移通过匹配版本备份恢复降级。
 
-## 9. 当前代码差距
+## 9. 当前实现状态与后续差距
 
-现有脚手架尚无可运行前后端和完整投递实现。已有 Prisma 草案含 Variant/Revision/Outbox，配置依赖 Redis，能力 DTO 含未实现动作，渲染模块的素材路由与接口前缀不一致、微信限额缺少已核验来源；在实现阶段按 v0.2 对齐，不为迁就脚手架增加首版需求。现有依赖版本需安装、构建与兼容性验证后锁定。没有完成真实账号验收。
+P1 已建立可构建的前后端入口、数据库会话锁 Worker 骨架、四服务 Compose、配置生成、版本化初始迁移和 CI。Prisma 已对齐为单套 Article/Revision，移除 Variant/Outbox；能力 DTO 仅包含读取与新增草稿，素材地址统一为 `/api/v1/assets/:id`。微信限额改为显式输入，不再直接采用未核验常数。详见 [P1 验证记录](P1-VERIFICATION.md)。
+
+当前页面仅用于工程连通性验证；Worker 尚不认领和执行投递任务。登录、账号管理、编辑与完整投递用例在 P2–P4 实现，恢复与真实微信验收在后续阶段执行。依赖已锁定并通过 Windows/Linux 构建，不表示微信实际权限、NAS 或 arm64 已验证。

@@ -1,0 +1,69 @@
+:root {
+  font-family: 'Manrope Variable', 'Microsoft YaHei', sans-serif;
+  color: #222b27;
+  background: #f5f7f6;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font-size: 16px;
+}
+.workspace {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 40px;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid #dce2de;
+}
+.wordmark {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -1.5px;
+}
+.brand-dot {
+  color: #35634e;
+}
+.subtitle {
+  color: #5b6961;
+  font-size: 14px;
+}
+section {
+  padding: 100px 0;
+}
+.eyebrow {
+  color: #35634e;
+  font-size: 14px;
+}
+h1.ant-typography {
+  margin: 24px 0;
+  font-size: clamp(32px, 5vw, 52px);
+  letter-spacing: -1px;
+}
+.intro {
+  color: #5b6961;
+  line-height: 1.9;
+}
+.connection {
+  margin-top: 60px;
+  font-size: 14px;
+  color: #5b6961;
+}
+@media (max-width: 640px) {
+  .workspace {
+    padding: 24px;
+  }
+  section {
+    padding: 64px 0;
+  }
+  header {
+    gap: 16px;
+  }
+}

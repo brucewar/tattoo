@@ -1,15 +1,16 @@
 generator client {
   provider = "prisma-client-js"
 }
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
 enum Platform {
   wechat
-  zhihu
-  xiaohongshu
 }
+
 enum DeliveryState {
   QUEUED
   RUNNING
@@ -17,126 +18,170 @@ enum DeliveryState {
   FAILED
   UNCERTAIN
 }
+
+enum AssetKind {
+  COVER
+  BODY
+}
+
 model User {
-  id           String @id @default(uuid()) @db.Uuid
-  email        String @unique
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
   passwordHash String
   sessions     Session[]
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
 }
+
 model Session {
-  id        String @id
-  userId    String @db.Uuid
-  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String   @id
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
+  createdAt DateTime @default(now())
+
   @@index([expiresAt])
 }
+
 model Account {
-  id                String @id @default(uuid()) @db.Uuid
-  platform          Platform @default(wechat)
+  id                String        @id @default(uuid()) @db.Uuid
+  platform          Platform      @default(wechat)
   name              String
-  appId             String @unique
+  appId             String        @unique
   secretEncrypted   String
-  verifiedAt        DateTime?
-  verificationError String?
-  capabilities      Json
+  credentialVersion Int           @default(1)
+  tokenEncrypted    String?
+  tokenExpiresAt    DateTime?
+  capabilities      Json          @default("{\"readDraft\":{\"status\":\"unverified\"},\"saveDraft\":{\"status\":\"unverified\"}}")
   deliveries        Delivery[]
   remoteAssets      RemoteAsset[]
-  createdAt         DateTime @default(now())
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 }
+
 model Article {
-  id        String @id @default(uuid()) @db.Uuid
-  version   Int @default(1)
-  title     String
-  document  Json
-  digest    String @default("")
-  author    String @default("")
-  sourceUrl String @default("")
-  coverId   String? @db.Uuid
-  cover     Asset? @relation(fields: [coverId], references: [id])
-  variants  Variant[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                String     @id @default(uuid()) @db.Uuid
+  version           Int        @default(1)
+  currentRevisionId String?    @unique @db.Uuid
+  currentRevision   Revision?  @relation("CurrentRevision", fields: [currentRevisionId], references: [id], onDelete: Restrict)
+  revisions         Revision[] @relation("ArticleRevisions")
+  isTest            Boolean    @default(false)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 }
-model Variant {
-  id        String @id @default(uuid()) @db.Uuid
-  articleId String @db.Uuid
-  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
-  platform  Platform
-  revisions Revision[]
-  @@unique([articleId, platform])
-}
+
 model Revision {
-  id        String @id @default(uuid()) @db.Uuid
-  variantId String @db.Uuid
-  variant   Variant @relation(fields: [variantId], references: [id], onDelete: Cascade)
-  version   Int
-  title     String
-  document  Json
-  digest    String
-  author    String
-  sourceUrl String
-  coverId   String? @db.Uuid
-  cover     Asset? @relation(fields: [coverId], references: [id])
-  deliveries Delivery[]
-  createdAt DateTime @default(now())
-  @@unique([variantId, version])
+  id          String          @id @default(uuid()) @db.Uuid
+  articleId   String          @db.Uuid
+  article     Article         @relation("ArticleRevisions", fields: [articleId], references: [id], onDelete: Restrict)
+  currentFor  Article?        @relation("CurrentRevision")
+  version     Int
+  title       String
+  document    Json
+  digest      String          @default("")
+  author      String          @default("")
+  sourceUrl   String          @default("")
+  coverId     String?         @db.Uuid
+  cover       Asset?          @relation("RevisionCover", fields: [coverId], references: [id], onDelete: Restrict)
+  contentHash String
+  assets      RevisionAsset[]
+  deliveries  Delivery[]
+  createdAt   DateTime        @default(now())
+
+  @@unique([articleId, version])
 }
+
 model Asset {
-  id         String @id @default(uuid()) @db.Uuid
-  name       String
-  mime       String
-  size       Int
-  sha256     String @unique
-  path       String
-  articles   Article[]
-  revisions  Revision[]
+  id           String          @id @default(uuid()) @db.Uuid
+  name         String
+  mime         String
+  size         Int
+  width        Int
+  height       Int
+  sha256       String          @unique
+  path         String          @unique
+  covers       Revision[]      @relation("RevisionCover")
+  revisions    RevisionAsset[]
   remoteAssets RemoteAsset[]
-  createdAt  DateTime @default(now())
+  createdAt    DateTime        @default(now())
 }
+
+model RevisionAsset {
+  revisionId String   @db.Uuid
+  assetId    String   @db.Uuid
+  revision   Revision @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+  asset      Asset    @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@id([revisionId, assetId])
+}
+
 model RemoteAsset {
-  id        String @id @default(uuid()) @db.Uuid
-  accountId String @db.Uuid
-  account   Account @relation(fields: [accountId], references: [id])
-  assetId   String @db.Uuid
-  asset     Asset @relation(fields: [assetId], references: [id])
-  kind      String
-  remoteId  String
+  id        String    @id @default(uuid()) @db.Uuid
+  accountId String    @db.Uuid
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  assetId   String    @db.Uuid
+  asset     Asset     @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  kind      AssetKind
+  remoteId  String?
   url       String?
+  createdAt DateTime  @default(now())
+
   @@unique([accountId, assetId, kind])
 }
+
 model Delivery {
-  id          String @id @default(uuid()) @db.Uuid
-  revisionId  String @db.Uuid
-  revision    Revision @relation(fields: [revisionId], references: [id])
-  accountId   String @db.Uuid
-  account     Account @relation(fields: [accountId], references: [id])
-  action      String @default("save_draft")
-  state       DeliveryState @default(QUEUED)
-  stage       String @default("等待执行")
-  remoteId    String?
-  error       String?
-  artifact    Json?
-  attempts    Int @default(0)
+  id                  String            @id @default(uuid()) @db.Uuid
+  revisionId          String            @db.Uuid
+  revision            Revision          @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+  accountId           String            @db.Uuid
+  account             Account           @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  platform            Platform          @default(wechat)
+  action              String            @default("save_draft")
+  requestKey          String?           @unique
+  state               DeliveryState     @default(QUEUED)
+  stage               String            @default("等待执行")
+  renderVersion       String
+  artifact            Json?
+  remoteId            String?
+  platformResult      Json?
+  resultSource        String?
+  error               String?
+  executionId         String?           @db.Uuid
+  heartbeatAt         DateTime?
   submissionStartedAt DateTime?
+  completedAt         DateTime?
+  attempts            DeliveryAttempt[]
+  events              DeliveryEvent[]
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  @@unique([revisionId, accountId, action])
+  @@index([state, createdAt])
+}
+
+model DeliveryAttempt {
+  id          String          @id @default(uuid()) @db.Uuid
+  deliveryId  String          @db.Uuid
+  delivery    Delivery        @relation(fields: [deliveryId], references: [id], onDelete: Restrict)
+  number      Int
+  state       DeliveryState   @default(RUNNING)
+  stage       String
+  error       String?
+  startedAt   DateTime        @default(now())
   completedAt DateTime?
   events      DeliveryEvent[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  @@unique([revisionId, accountId, action])
-  @@index([state, updatedAt])
+
+  @@unique([deliveryId, number])
 }
+
 model DeliveryEvent {
-  id         String @id @default(uuid()) @db.Uuid
-  deliveryId String @db.Uuid
-  delivery   Delivery @relation(fields: [deliveryId], references: [id])
+  id         String           @id @default(uuid()) @db.Uuid
+  deliveryId String           @db.Uuid
+  delivery   Delivery         @relation(fields: [deliveryId], references: [id], onDelete: Restrict)
+  attemptId  String?          @db.Uuid
+  attempt    DeliveryAttempt? @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  actor      String
   message    String
-  createdAt  DateTime @default(now())
-}
-model OutboxEvent {
-  id         String @id @default(uuid()) @db.Uuid
-  deliveryId String @db.Uuid
-  sentAt     DateTime?
-  createdAt  DateTime @default(now())
-  @@index([sentAt, createdAt])
+  createdAt  DateTime         @default(now())
+
+  @@index([deliveryId, createdAt])
 }

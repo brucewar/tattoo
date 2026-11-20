@@ -45,6 +45,8 @@ docker compose up -d --wait
 
 当前 P1 只验证工程入口、健康检查和单 Worker 执行权，不表示登录、编辑或微信投递已完成。初始密码会在 P2 管理员初始化功能中使用，不能把启动页视为业务验收。
 
+镜像构建完成后，可运行 `node scripts/verify-foundation.mjs` 执行隔离部署验证。它使用固定的 `tattoo-p1-smoke` Compose 项目和 18080 端口，验证健康检查、启动失败门槛、Worker 互斥和容器重建持久化；结束后停止测试容器，保留隔离测试卷用于排查。不要将该项目名用于真实部署。
+
 ## 持久化与后续恢复
 
 普通重建使用 `docker compose up -d --build`，不要添加 `down -v`。备份应包含一致的 PostgreSQL 导出和素材卷，主密钥独立保存；完整备份恢复脚本与实测在 P5 交付。恢复实例先保持 `REMOTE_WRITES_ENABLED=false`，核对旧任务后再显式启用。此开关不代表微信账号已具备写权限。

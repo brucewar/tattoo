@@ -1,0 +1,114 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const project = 'tattoo-p1-smoke';
+const cwd = fileURLToPath(new URL('../', import.meta.url));
+const env = { ...process.env, WEB_PORT: '18080', APP_ORIGIN: 'http://localhost:18080' };
+const prefix = ['compose', '-p', project];
+const marker = randomUUID();
+
+function compose(args, input, allowFailure = false) {
+  const result = spawnSync('docker', [...prefix, ...args], {
+    cwd,
+    env,
+    input,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  if (!allowFailure && result.status !== 0) {
+    console.error(result.stdout, result.stderr);
+    throw new Error(`部署验证命令失败：${args[0]}`);
+  }
+  return result;
+}
+
+function execute(script) {
+  return compose(['exec', '-T', 'api', 'node', '--input-type=module'], script);
+}
+
+try {
+  compose(['config', '--quiet']);
+  compose(['up', '-d', '--wait', '--wait-timeout', '150']);
+  const services = compose(['ps', '--format', 'json'])
+    .stdout.trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(services.length, 4);
+  for (const service of services) {
+    assert.equal(service.Health, 'healthy', service.Service);
+    const published = (service.Publishers ?? []).filter((port) => port.PublishedPort > 0);
+    if (service.Service === 'web')
+      assert.ok(published.some((port) => port.PublishedPort === 18080));
+    else assert.equal(published.length, 0, `${service.Service} 不应发布宿主端口`);
+  }
+  assert.equal(
+    services.find((service) => service.Service === 'api').Image,
+    services.find((service) => service.Service === 'worker').Image,
+  );
+  const page = await fetch('http://127.0.0.1:18080/');
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /Tattoo/);
+  const ready = await fetch('http://127.0.0.1:18080/api/v1/health/ready');
+  assert.equal(ready.status, 200);
+  assert.equal((await ready.json()).data.status, 'ready');
+  console.info('PASS: 四服务健康、共享应用镜像、仅 Web 发布端口、页面与 API 可访问');
+
+  const missingKey = compose(
+    ['run', '--rm', '--no-deps', '-e', 'APP_ENCRYPTION_KEY=', 'api'],
+    undefined,
+    true,
+  );
+  assert.notEqual(missingKey.status, 0, '缺少主密钥时 API 必须拒绝启动');
+  assert.match(missingKey.stderr, /APP_ENCRYPTION_KEY/);
+  const migrationFailure = compose(
+    [
+      'run',
+      '--rm',
+      '--no-deps',
+      '-e',
+      'DATABASE_URL=postgresql://invalid:invalid@postgres:5432/does_not_exist?connect_timeout=3',
+      'api',
+    ],
+    undefined,
+    true,
+  );
+  assert.notEqual(migrationFailure.status, 0, '迁移失败时必须拒绝启动');
+  assert.doesNotMatch(migrationFailure.stdout, /Tattoo API 已启动/);
+  const duplicate = compose(['run', '--rm', '--no-deps', 'worker'], undefined, true);
+  assert.notEqual(duplicate.status, 0, '第二个 Worker 不应取得执行权');
+  assert.match(duplicate.stderr, /Worker 停止/);
+  console.info('PASS: 缺密钥拒启、迁移失败阻止启动、重复 Worker 被拒绝');
+
+  execute(`
+    import { Client } from 'pg';
+    import { writeFile } from 'node:fs/promises';
+    const client = new Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    try {
+      await client.query('CREATE TABLE IF NOT EXISTS tattoo_p1_probe (id text PRIMARY KEY)');
+      await client.query('INSERT INTO tattoo_p1_probe (id) VALUES ($1)', [${JSON.stringify(marker)}]);
+      await writeFile('/data/assets/.tattoo-p1-probe', ${JSON.stringify(marker)});
+    } finally { await client.end(); }
+  `);
+  compose(['up', '-d', '--force-recreate', '--wait', '--wait-timeout', '150']);
+  execute(`
+    import assert from 'node:assert/strict';
+    import { Client } from 'pg';
+    import { readFile, unlink } from 'node:fs/promises';
+    const client = new Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    try {
+      const result = await client.query('SELECT id FROM tattoo_p1_probe WHERE id=$1', [${JSON.stringify(marker)}]);
+      assert.equal(result.rowCount, 1);
+      assert.equal(await readFile('/data/assets/.tattoo-p1-probe', 'utf8'), ${JSON.stringify(marker)});
+      await client.query('DROP TABLE tattoo_p1_probe');
+      await unlink('/data/assets/.tattoo-p1-probe');
+    } finally { await client.end(); }
+  `);
+  console.info('PASS: 重建四个容器后数据库和素材卷数据均保留，重复迁移成功');
+} finally {
+  // This fixed project is reserved for disposable verification, never the user's deployment.
+  compose(['down', '--remove-orphans']);
+}

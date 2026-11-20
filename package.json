@@ -1,19 +1,49 @@
 {
-  "name": "tattoo", "version": "0.1.0", "private": true,
+  "name": "tattoo",
+  "version": "0.1.0",
+  "private": true,
   "description": "A self-hosted, versioned content desk for multi-platform publishing.",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/brucewar/tattoo.git" }, "engines": { "node": ">=22.15" },
-  "workspaces": ["apps/*", "packages/*"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brucewar/tattoo.git"
+  },
+  "engines": {
+    "node": ">=22.15 <23",
+    "npm": ">=10 <12"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "concurrently -k -n contracts,api,web \"npm run dev -w @tattoo/contracts\" \"npm run dev -w @tattoo/server\" \"npm run dev -w @tattoo/web\"",
-    "build": "npm run build -w @tattoo/contracts && npm run build -w @tattoo/server && npm run build -w @tattoo/web",
-    "typecheck": "npm run build -w @tattoo/contracts && npm run typecheck --workspaces --if-present",
-    "test": "vitest run", "test:e2e": "playwright test",
+    "dev": "npm run build -w @tattoo/contracts && concurrently -k -n contracts,api,web \"npm run dev -w @tattoo/contracts\" \"npm run dev -w @tattoo/server\" \"npm run dev -w @tattoo/web\"",
+    "build": "npm run db:generate && npm run build -w @tattoo/contracts && npm run build -w @tattoo/server && npm run build -w @tattoo/web",
+    "typecheck": "npm run db:generate && npm run build -w @tattoo/contracts && npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "test:integration": "node scripts/test-integration.mjs",
+    "test:e2e": "playwright test",
     "db:generate": "prisma generate --schema apps/server/prisma/schema.prisma",
     "db:deploy": "prisma migrate deploy --schema apps/server/prisma/schema.prisma",
     "setup": "node scripts/configure.mjs",
-    "format": "prettier --write apps packages tests docs scripts *.json *.yml",
-    "format:check": "prettier --check apps packages tests docs scripts *.json *.yml"
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
-  "devDependencies": { "@playwright/test": "^1.58.0", "@types/node": "^22.15.0", "concurrently": "^9.1.2", "prettier": "^3.5.3", "prisma": "6.19.0", "typescript": "~5.8.3", "vitest": "^3.2.0", "yaml": "^2.8.0" }
+  "devDependencies": {
+    "@playwright/test": "^1.58.0",
+    "@types/node": "^22.15.0",
+    "concurrently": "^9.1.2",
+    "prettier": "^3.5.3",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.0",
+    "yaml": "^2.8.0",
+    "vite": "6.4.6"
+  },
+  "packageManager": "npm@11.6.0",
+  "dependencies": {
+    "prisma": "6.19.0"
+  },
+  "overrides": {
+    "vite": "6.4.6"
+  }
 }

@@ -1,0 +1,19 @@
+name: 缺陷报告
+description: 报告可复现的问题（请勿提交任何凭证）
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 问题与预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 版本、架构与脱敏后的错误

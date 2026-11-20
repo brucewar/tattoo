@@ -4,7 +4,7 @@
 
 代码仓库：[brucewar/tattoo](https://github.com/brucewar/tattoo)。
 
-> 当前状态：**SPEC / PLAN 已确认，进入实现阶段**。第一阶段业务功能尚在开发，尚未通过真实微信公众号验收。
+> 当前状态：**SPEC / PLAN 已确认，P1 工程基础已完成**。登录、编辑与投递等业务功能尚待实现，尚未通过真实微信公众号验收。
 
 ## 设计与实施
 
@@ -23,7 +23,7 @@ cd tattoo
 
 将仓库克隆到自己选择的目录即可。
 
-开发与 Docker 验证步骤见 [开发说明](docs/DEVELOPMENT.md)。
+开发与 Docker 验证步骤见 [开发说明](docs/DEVELOPMENT.md)，实际结果见 [P1 验证记录](docs/P1-VERIFICATION.md)。
 
 ## 第一阶段范围
 

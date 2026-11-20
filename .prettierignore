@@ -1,0 +1,9 @@
+node_modules/
+dist/
+package-lock.json
+apps/server/prisma/migrations/
+.env*
+data/
+coverage/
+playwright-report/
+test-results/
