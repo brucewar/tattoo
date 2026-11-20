@@ -4,6 +4,8 @@
 
 当前已有 [P1](P1-VERIFICATION.md)、[P2](P2-VERIFICATION.md)、[P3](P3-VERIFICATION.md)、[P4](P4-VERIFICATION.md) 的实现与验证记录。P4 对应提交 `83acbeb` 的 [CI](https://github.com/brucewar/tattoo/actions/runs/44691456805) 已通过，包括 85 项单元、43 项真实 PostgreSQL 集成、12 项浏览器用例及 Docker 启动和持久化检查。这些是该版本的历史证据；P5 的新增检查必须记录本次实际结果，不能沿用旧计数。
 
+P5 候选实现 `8bf5fea` 的 [CI](https://github.com/brucewar/tattoo/actions/runs/44695790900) 已通过 114 项单元、43 项 PostgreSQL 集成、14 项浏览器及真实 Docker 恢复演练，补齐 AT-01 至 AT-08 的自动验收证据。详情与本地失败/未执行项见 [P5 验证记录](P5-VERIFICATION.md)；AT-09 仍未执行。
+
 验收对象是标准 Docker 部署；记录实际执行的平台，不要求特定 NAS 型号。已验证 Linux/amd64，其他平台未实测时注明范围。真实微信公众号验收仍需用户在自己的环境显式完成。
 
 ## AT 对照
@@ -50,9 +52,10 @@ Docker 验证在镜像构建后执行：
 ```bash
 docker compose build
 node scripts/verify-foundation.mjs
+npm run verify:recovery
 ```
 
-`verify-foundation` 使用保留给测试的 `tattoo-p1-smoke` 项目与端口，不能指向真实部署；它验证启动和重建，不代替恢复演练。按 [运维说明](OPERATIONS.md#恢复到空实例) 在单独空项目执行备份恢复，并记录原实例/目标实例、数据比对及任务隔离结果。错误路径只在隔离实例和备份副本上验证。
+`verify-foundation` 使用保留给测试的 `tattoo-p1-smoke` 项目与端口，不能指向真实部署；它验证启动和重建，不代替恢复演练。`verify:recovery` 在随机隔离项目实际执行备份恢复，要求发布端口可从管理电脑的环回地址访问；不自动配置远程 Docker 网络。日常演练也可按 [运维说明](OPERATIONS.md#恢复到空实例) 在单独空项目执行备份恢复，并记录原实例/目标实例、数据比对及任务隔离结果。错误路径只在隔离实例和备份副本上验证。
 
 测试报告至少区分通过、失败与未执行，并记录源码版本、命令、环境和结果。CI 通过还需引用对应提交的运行链接；Docker 恢复与真实微信分别保留证据，不以构建输出替代运行结果。
 
