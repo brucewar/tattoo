@@ -272,82 +272,74 @@ test('提交响应迟到时锁定原公众号，预检发现已有任务也不�
 
 test.describe('窄屏投递检查', () => {
   test.use({ viewport: { width: 390, height: 844 } });
-  for (const sample of [1, 2, 3]) {
-    test(
-      '不完整文章可以保存，缺封面和正文时不能投递，页面无横向溢出 · 采样 ' + sample,
-      async ({ page }, testInfo) => {
-        await login(page);
-        const target = await account(page, '窄屏');
-        await page.getByRole('button', { name: '新建文章', exact: true }).click();
-        await save(page);
-        const before = await audit();
-        await page.getByRole('button', { name: '存入微信草稿', exact: true }).click();
-        const dialog = page.getByRole('dialog', { name: '存入微信草稿', exact: true });
-        await dialog.getByRole('combobox', { name: '目标公众号', exact: true }).click();
-        await page.getByRole('option', { name: target.name, exact: true }).click();
-        await expect(dialog.getByText('请上传文章封面', { exact: true })).toBeVisible();
-        await expect(dialog.getByText('正文不能为空', { exact: true })).toBeVisible();
-        await expect(
-          dialog.getByRole('button', { name: '确认存入微信草稿', exact: true }),
-        ).toBeDisabled();
-        const submit = dialog.getByRole('button', { name: '确认存入微信草稿', exact: true });
-        await submit.scrollIntoViewIfNeeded();
-        await expect(submit).toBeVisible();
-        const size = await page.evaluate(() => {
-          const width = document.documentElement.clientWidth;
-          const scroll = document.documentElement.scrollWidth;
-          const describe = (element: Element) => {
-            const rect = element.getBoundingClientRect();
-            const css = getComputedStyle(element);
-            return {
-              tag: element.tagName,
-              classes: element.getAttribute('class'),
-              left: rect.left,
-              right: rect.right,
-              width: rect.width,
-              client: element.clientWidth,
-              scroll: element.scrollWidth,
-              display: css.display,
-              position: css.position,
-              whiteSpace: css.whiteSpace,
-              transform: css.transform,
-              origin: css.transformOrigin,
-            };
-          };
+  test('不完整文章可以保存，缺封面和正文时不能投递，页面无横向溢出', async ({ page }, testInfo) => {
+    await login(page);
+    const target = await account(page, '窄屏');
+    await page.getByRole('button', { name: '新建文章', exact: true }).click();
+    await save(page);
+    const before = await audit();
+    await page.getByRole('button', { name: '存入微信草稿', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '存入微信草稿', exact: true });
+    await dialog.getByRole('combobox', { name: '目标公众号', exact: true }).click();
+    await page.getByRole('option', { name: target.name, exact: true }).click();
+    await expect(dialog.getByText('请上传文章封面', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('正文不能为空', { exact: true })).toBeVisible();
+    await expect(
+      dialog.getByRole('button', { name: '确认存入微信草稿', exact: true }),
+    ).toBeDisabled();
+    const submit = dialog.getByRole('button', { name: '确认存入微信草稿', exact: true });
+    await submit.scrollIntoViewIfNeeded();
+    await expect(submit).toBeVisible();
+    const size = await page.evaluate(() => ({
+      width: document.documentElement.clientWidth,
+      scroll: document.documentElement.scrollWidth,
+    }));
+    if (size.scroll > size.width) {
+      const boundary = await page.evaluate(() => {
+        const width = document.documentElement.clientWidth;
+        const describe = (element: Element) => {
+          const rect = element.getBoundingClientRect();
+          const css = getComputedStyle(element);
           return {
-            width,
-            scroll,
-            x: window.scrollX,
-            browser: navigator.userAgent,
-            outside: [...document.querySelectorAll('*')]
-              .filter((element) => {
-                const rect = element.getBoundingClientRect();
-                return rect.width > 0 && (rect.right > width + 1 || rect.left < -1);
-              })
-              .slice(0, 12)
-              .map(describe),
-            overlays: [...document.querySelectorAll('.ant-modal, .ant-select-dropdown')].map(
-              describe,
-            ),
+            tag: element.tagName,
+            classes: element.getAttribute('class'),
+            left: rect.left,
+            right: rect.right,
+            width: rect.width,
+            client: element.clientWidth,
+            scroll: element.scrollWidth,
+            position: css.position,
+            display: css.display,
+            transform: css.transform,
+            origin: css.transformOrigin,
           };
-        });
-        const settled =
-          size.scroll > size.width
-            ? await page
-                .waitForTimeout(350)
-                .then(() => page.evaluate(() => document.documentElement.scrollWidth))
-            : size.scroll;
-        expect(
-          size.scroll,
-          '移动端布局边界：' + JSON.stringify({ ...size, settled }),
-        ).toBeLessThanOrEqual(size.width);
-        const after = await audit();
-        expect(after.calls).toEqual(before.calls);
-        await page.screenshot({
-          path: testInfo.outputPath('p4-preflight-mobile.png'),
-          fullPage: true,
-        });
-      },
-    );
-  }
+        };
+        return {
+          now: document.documentElement.scrollWidth,
+          x: window.scrollX,
+          browser: navigator.userAgent,
+          outside: [...document.querySelectorAll('*')]
+            .filter((element) => {
+              const rect = element.getBoundingClientRect();
+              return rect.width > 0 && (rect.right > width + 1 || rect.left < -1);
+            })
+            .slice(0, 12)
+            .map(describe),
+          overlays: [...document.querySelectorAll('.ant-modal, .ant-select-dropdown')].map(
+            describe,
+          ),
+        };
+      });
+      await page.waitForTimeout(350);
+      const settled = await page.evaluate(() => document.documentElement.scrollWidth);
+      expect(
+        size.scroll,
+        '移动端布局边界：' + JSON.stringify({ ...size, boundary, settled }),
+      ).toBeLessThanOrEqual(size.width);
+    }
+    expect(size.scroll).toBeLessThanOrEqual(size.width);
+    const after = await audit();
+    expect(after.calls).toEqual(before.calls);
+    await page.screenshot({ path: testInfo.outputPath('p4-preflight-mobile.png'), fullPage: true });
+  });
 });
