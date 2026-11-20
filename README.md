@@ -2,9 +2,9 @@
 
 自托管的内容编辑与多平台投递工作台。第一阶段目标为微信公众号草稿箱，部署环境为群晖 Docker。
 
-项目名称统一为 **Tattoo**，代码仓库：[brucewar/tattoo](https://github.com/brucewar/tattoo)。本地工程目录：`D:/github/tattoo`。
+代码仓库：[brucewar/tattoo](https://github.com/brucewar/tattoo)。
 
-> 当前状态：**SPEC / PLAN 草案评审中**。仓库目前只有未验收的工程脚手架，尚不可作为完整应用部署，尚未通过真实微信公众号验收。
+> 当前状态：**SPEC / PLAN 已确认，进入实现阶段**。第一阶段业务功能尚在开发，尚未通过真实微信公众号验收。
 
 ## 设计与实施
 
@@ -12,7 +12,18 @@
 2. [技术设计](docs/ARCHITECTURE.md)
 3. [实施计划与进度](docs/PLAN.md)
 
-开发遵循 SPEC → PLAN → IMPLEMENT → VERIFY → RELEASE。需求和计划定稿后再继续业务实现；完成项必须有验证证据。
+开发遵循 SPEC → PLAN → IMPLEMENT → VERIFY → RELEASE。完成项必须有验证证据。
+
+## 获取源码
+
+```bash
+git clone https://github.com/brucewar/tattoo.git
+cd tattoo
+```
+
+将仓库克隆到自己选择的目录即可。
+
+开发与 Docker 验证步骤见 [开发说明](docs/DEVELOPMENT.md)。
 
 ## 第一阶段范围
 
