@@ -14,7 +14,7 @@ jobs:
           POSTGRES_DB: tattoo_test
         ports: ['5432:5432']
         options: >-
-          --health-cmd 'pg_isready -U tattoo -d tattoo_test'
+          --health-cmd "pg_isready -U tattoo -d tattoo_test"
           --health-interval 5s --health-timeout 5s --health-retries 15
     env:
       TEST_DATABASE_URL: postgresql://tattoo:tattoo_test@127.0.0.1:5432/tattoo_test
