@@ -6,13 +6,15 @@ import { Login } from './views/Login';
 import { Accounts } from './views/Accounts';
 import { Records } from './views/Records';
 import { Content } from './views/Content';
+import { Models } from './views/Models';
 
 export function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [bootError, setBootError] = useState('');
   const [expired, setExpired] = useState(false);
-  const [section, setSection] = useState<'content' | 'accounts' | 'records'>('content');
+  const [section, setSection] = useState<'content' | 'accounts' | 'records' | 'models'>('content');
   const [contentDirty, setContentDirty] = useState(false);
+  const [modelsDirty, setModelsDirty] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState('');
   const loadSession = useCallback(async () => {
@@ -41,8 +43,12 @@ export function App() {
   }, []);
   async function logout() {
     if (
-      contentDirty &&
-      !window.confirm('文章有未保存修改或正在处理的操作。确定退出并放弃本地编辑吗？')
+      (contentDirty || modelsDirty) &&
+      !window.confirm(
+        modelsDirty
+          ? '模型配置有未保存修改。确定退出并放弃修改吗？'
+          : '文章有未保存修改或正在处理的操作。确定退出并放弃本地编辑吗？',
+      )
     )
       return;
     setLoggingOut(true);
@@ -60,14 +66,19 @@ export function App() {
       setLoggingOut(false);
     }
   }
-  function navigate(next: 'content' | 'accounts' | 'records') {
+  function navigate(next: 'content' | 'accounts' | 'records' | 'models') {
     if (next === section) return;
     if (
-      contentDirty &&
-      !window.confirm('文章有未保存修改或正在处理的操作。确定离开并放弃本地编辑吗？')
+      (contentDirty || modelsDirty) &&
+      !window.confirm(
+        modelsDirty
+          ? '模型配置有未保存修改。确定离开并放弃修改吗？'
+          : '文章有未保存修改或正在处理的操作。确定离开并放弃本地编辑吗？',
+      )
     )
       return;
     setContentDirty(false);
+    setModelsDirty(false);
     setSection(next);
   }
   if (user === undefined)
@@ -129,6 +140,14 @@ export function App() {
             </button>
             <button
               type="button"
+              aria-current={section === 'models' ? 'page' : undefined}
+              className={section === 'models' ? 'active' : ''}
+              onClick={() => navigate('models')}
+            >
+              模型配置
+            </button>
+            <button
+              type="button"
               aria-current={section === 'records' ? 'page' : undefined}
               className={section === 'records' ? 'active' : ''}
               onClick={() => navigate('records')}
@@ -151,12 +170,15 @@ export function App() {
               onDirtyChange={setContentDirty}
               remoteWritesEnabled={Boolean(user.remoteWritesEnabled)}
               onInspectRecords={() => navigate('records')}
+              onConfigureModels={() => navigate('models')}
             />
           ) : section === 'accounts' ? (
             <Accounts
               remoteWritesEnabled={Boolean(user.remoteWritesEnabled)}
               onInspectRecords={() => navigate('records')}
             />
+          ) : section === 'models' ? (
+            <Models onDirtyChange={setModelsDirty} />
           ) : (
             <Records remoteWritesEnabled={Boolean(user.remoteWritesEnabled)} />
           )}

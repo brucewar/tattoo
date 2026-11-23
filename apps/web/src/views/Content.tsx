@@ -9,10 +9,12 @@ export function Content({
   onDirtyChange,
   remoteWritesEnabled,
   onInspectRecords,
+  onConfigureModels,
 }: {
   onDirtyChange: (dirty: boolean) => void;
   remoteWritesEnabled: boolean;
   onInspectRecords: () => void;
+  onConfigureModels: () => void;
 }) {
   const [selected, setSelected] = useState<string | null | undefined>(undefined);
   const [page, setPage] = useState(1);
@@ -47,6 +49,7 @@ export function Content({
         onDirtyChange={onDirtyChange}
         remoteWritesEnabled={remoteWritesEnabled}
         onInspectRecords={onInspectRecords}
+        onConfigureModels={onConfigureModels}
         onBack={() => {
           setSelected(undefined);
           setVersion((current) => current + 1);

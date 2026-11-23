@@ -124,6 +124,8 @@ node scripts/restore.mjs --input ./data/backups/before-upgrade --project tattoo-
 
 工具只启动恢复所需 PostgreSQL，不自动启动 API、Web 或 Worker。恢复后撤销原会话，旧 `QUEUED` / `RUNNING` 投递进入 `UNCERTAIN` 并保留核对事件；已有成功、失败和待核对记录保留。原实例可能在备份之后已经创建远程草稿，因此不能把旧队列当作尚未投递直接重放。
 
+P6–P8 的模型密钥同样随数据库备份并检查解密，旧排队/运行的生成任务也会冻结，不自动重新请求模型。恢复后先检查最近生成任务和已保存素材；微信写入开关只控制微信，用户明确发起的模型生成仍可能计费。配置和使用见 [模型说明](MODELS.md)。
+
 先仅启动读取与核对所需的服务：
 
 ```bash

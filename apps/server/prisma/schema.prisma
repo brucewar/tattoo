@@ -24,6 +24,70 @@ enum AssetKind {
   BODY
 }
 
+enum AiCapability {
+  text
+  image
+}
+
+enum GenerationKind {
+  ARTICLE
+  REWRITE
+  COVER
+  ILLUSTRATION
+  TEST_TEXT
+  TEST_IMAGE
+}
+
+enum GenerationState {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  UNCERTAIN
+}
+
+model AiModel {
+  id                  String          @id @default(uuid()) @db.Uuid
+  capability          AiCapability    @unique
+  baseUrl             String
+  model               String
+  apiKeyEncrypted     String
+  version             Int             @default(1)
+  imageSize           String          @default("")
+  imageResponseFormat String          @default("auto")
+  jobs                GenerationJob[]
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+}
+
+model GenerationJob {
+  id             String          @id @default(uuid()) @db.Uuid
+  requestKey     String          @unique @db.Uuid
+  kind           GenerationKind
+  capability     AiCapability
+  modelId        String          @db.Uuid
+  modelConfig    AiModel         @relation(fields: [modelId], references: [id], onDelete: Restrict)
+  model          String
+  configVersion  Int
+  inputHash      String
+  prompt         String
+  sourceText     String          @default("")
+  articleId      String?         @db.Uuid
+  state          GenerationState @default(QUEUED)
+  result         Json?
+  error          String?
+  executionId    String?         @db.Uuid
+  heartbeatAt    DateTime?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([state, createdAt])
+  @@index([modelId, configVersion, kind, createdAt])
+  @@index([articleId, createdAt])
+}
+
 model User {
   id           String    @id @default(uuid()) @db.Uuid
   email        String    @unique

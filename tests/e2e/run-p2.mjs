@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { Client } from 'pg';
+import sharp from 'sharp';
+import { createAiMock } from '../helpers/ai-mock.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -45,6 +47,7 @@ let createdSchema = false;
 let storage;
 let temporaryRoot;
 let mock;
+let aiMock;
 
 function redact(value) {
   let result = value;
@@ -218,12 +221,18 @@ try {
   }
   temporaryRoot = await realpath(tmpdir());
   storage = await mkdtemp(join(temporaryRoot, 'tattoo-p2-e2e-'));
+  aiMock = createAiMock(
+    await sharp({ create: { width: 360, height: 200, channels: 3, background: '#476b5a' } })
+      .png()
+      .toBuffer(),
+  );
   mock = createServer(async (incoming, outgoing) => {
     const pathname = new URL(incoming.url ?? '/', 'http://mock.local').pathname;
     const chunks = [];
     for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
     const body = Buffer.concat(chunks);
     outgoing.setHeader('Content-Type', 'application/json');
+    if (await aiMock.handle(incoming, outgoing, pathname, body)) return;
     if (pathname === '/__tattoo_control' && incoming.method === 'POST') {
       const input = JSON.parse(body.toString('utf8'));
       assert.ok(['success', 'disconnect', 'refused'].includes(input.nextDraft));
@@ -287,6 +296,8 @@ try {
     TATTOO_E2E_EMAIL: adminEmail,
     TATTOO_E2E_PASSWORD: adminPassword,
     TATTOO_E2E_WECHAT_CONTROL_URL: `http://127.0.0.1:${mockAddress.port}`,
+    TATTOO_E2E_AI_BASE_URL: `http://127.0.0.1:${mockAddress.port}/v1`,
+    TATTOO_E2E_AI_CONTROL_URL: `http://127.0.0.1:${mockAddress.port}`,
   };
   const api = start('API', [join(root, 'apps/server/dist/main.js')], env);
   await ready(`${apiOrigin}/api/v1/health/ready`, api);
@@ -307,10 +318,10 @@ try {
     join(root, 'apps/web'),
   );
   await ready(webOrigin, vite);
-  console.info('P2/P3/P4/P5 浏览器验证：独立 API、Worker、Vite 和模拟微信已就绪');
+  console.info('浏览器验证：独立 API、Worker、Vite、模拟微信与模型接口已就绪');
   const playwright = start(
     'Playwright',
-    [join(root, 'node_modules/@playwright/test/cli.js'), 'test'],
+    [join(root, 'node_modules/@playwright/test/cli.js'), 'test', ...process.argv.slice(2)],
     env,
     root,
     true,
@@ -325,6 +336,8 @@ try {
     1,
   );
   assert.deepEqual(unexpected, []);
+  assert.ok(aiMock.calls.text >= 1);
+  assert.ok(aiMock.calls.image >= 1);
 } catch (error) {
   failed = true;
   primaryError = error;
@@ -334,6 +347,7 @@ try {
   for (const child of [...children].reverse())
     await cleanup(`停止 ${logs.get(child).name}`, () => stop(child));
   if (mock) {
+    aiMock?.releaseAll();
     await cleanup('关闭模拟微信', async () => {
       mock.closeAllConnections();
       if (mock.listening)

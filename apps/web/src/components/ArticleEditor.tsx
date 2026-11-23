@@ -11,6 +11,7 @@ import { ArticleMetadata } from './article/Metadata';
 import { ArticleRevisionActions } from './article/RevisionViews';
 import { ArticleLinkDialog } from './article/LinkDialog';
 import { ArticleDelivery } from './article/ArticleDelivery';
+import { ArticleGeneration } from './ai/ArticleGeneration';
 import '../editor.css';
 
 export function ArticleEditor({
@@ -19,12 +20,14 @@ export function ArticleEditor({
   onDirtyChange,
   remoteWritesEnabled,
   onInspectRecords,
+  onConfigureModels,
 }: {
   id: string | null;
   onBack: () => void;
   onDirtyChange: (dirty: boolean) => void;
   remoteWritesEnabled: boolean;
   onInspectRecords: () => void;
+  onConfigureModels: () => void;
 }) {
   const [article, setArticle] = useState<Article | null>(null);
   const [draft, setDraft] = useState<ArticleInput>(blankArticle);
@@ -39,13 +42,14 @@ export function ArticleEditor({
   const [linkOpen, setLinkOpen] = useState(false);
   const [revisionActive, setRevisionActive] = useState(false);
   const [deliveryActive, setDeliveryActive] = useState(false);
+  const [aiActive, setAiActive] = useState(false);
   const bodyFile = useRef<HTMLInputElement>(null);
   const coverFile = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
   const uploadHandler = useRef<(file: File, cover: boolean) => void>(() => undefined);
   const dirty = fingerprint(draft) !== baseline;
   const busy = saving || uploading;
-  const overlayActive = revisionActive || deliveryActive || linkOpen;
+  const overlayActive = revisionActive || deliveryActive || linkOpen || aiActive;
   const editor = useEditor({
     extensions: [
       WritingKit.configure({
@@ -320,7 +324,7 @@ export function ArticleEditor({
           <ArticleRevisionActions
             article={article}
             dirty={dirty}
-            busy={busy || loading || deliveryActive || linkOpen}
+            busy={busy || loading || deliveryActive || linkOpen || aiActive}
             onNotice={setNotice}
             onError={setError}
             onActivityChange={setRevisionActive}
@@ -328,7 +332,7 @@ export function ArticleEditor({
           <ArticleDelivery
             article={article}
             dirty={dirty}
-            busy={busy || loading || revisionActive || linkOpen}
+            busy={busy || loading || revisionActive || linkOpen || aiActive}
             remoteWritesEnabled={remoteWritesEnabled}
             onNotice={setNotice}
             onInspectRecords={onInspectRecords}
@@ -345,6 +349,27 @@ export function ArticleEditor({
           </Button>
         </div>
       </div>
+      <ArticleGeneration
+        articleId={article?.id ?? id}
+        draft={draft}
+        editor={editor}
+        disabled={
+          busy || loading || revisionActive || deliveryActive || linkOpen || Boolean(id && !article)
+        }
+        onActivityChange={setAiActive}
+        onAdoptArticle={(result) => {
+          editor?.commands.setContent(result.document, { emitUpdate: false });
+          setDraft((current) => ({
+            ...current,
+            title: result.title,
+            digest: result.digest,
+            document: result.document,
+          }));
+        }}
+        onAdoptCover={(coverId) => setDraft((current) => ({ ...current, coverId }))}
+        onNotice={setNotice}
+        onConfigureModels={onConfigureModels}
+      />
       {error && (
         <Alert
           type="error"

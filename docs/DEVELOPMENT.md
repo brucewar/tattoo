@@ -105,6 +105,8 @@ Remove-Item Env:TATTOO_NEW_PASSWORD
 
 首次使用可运行 `npx playwright install chromium` 安装与当前锁文件匹配的浏览器；如使用已有浏览器，可通过 `TATTOO_E2E_BROWSER_EXECUTABLE` 指定可执行文件，不将本机路径写进仓库。在 Windows 上，应先停止本项目 API/Worker 子进程，再执行需要重新生成 Prisma Client 的构建，避免引擎 DLL 被占用。
 
+本轮浏览器入口包含 P6 AI 配置、生成、改写和配图；模型与微信均由隔离的 HTTP 模拟服务提供，不使用真实密钥。完整执行 `node tests/e2e/run-p2.mjs`；定点联调可把 Playwright 文件过滤器传给该脚本，例如 `node tests/e2e/run-p2.mjs p2.spec.ts p6-ai.spec.ts`，同时保留基础草稿防重放与 AI 调用审计。模型接口及操作说明见 [模型配置与 AI 创作](MODELS.md)。
+
 ## 持久化与后续恢复
 
 普通重建使用 `docker compose up -d --build`，不要添加 `down -v`。备份应包含一致的 PostgreSQL 导出和素材卷，主密钥独立保存；已提供 `node scripts/backup.mjs` 与 `node scripts/restore.mjs`；管理电脑通过当前 Docker context 操作目标容器，数据库与素材采用同一次停机备份。具体参数、主密钥和匹配镜像保管、空实例恢复及旧任务核对见 [运维说明](OPERATIONS.md)。恢复实例先保持 `REMOTE_WRITES_ENABLED=false`，核对旧任务后再显式启用。此开关不代表微信账号已具备写权限。

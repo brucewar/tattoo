@@ -31,7 +31,7 @@ jobs:
       - run: npm run test:integration
       - run: npm run build
       - run: npx playwright install --with-deps chromium
-      - name: Browser checks for accounts, editing and draft delivery
+      - name: Browser checks for AI creation, editing and draft delivery
         run: node tests/e2e/run-p2.mjs
       - run: npm run setup
       - run: docker compose config --quiet

@@ -78,6 +78,41 @@
   flex-wrap: wrap;
   gap: 10px;
 }
+.ai-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: -10px 0 24px;
+}
+.ai-input-field {
+  margin: 22px 0;
+}
+.ai-input-field > label {
+  display: block;
+  font-size: 0.875rem;
+  margin-bottom: 10px;
+}
+.ai-input-field .ant-radio-group {
+  margin-bottom: 12px;
+}
+.ai-candidate {
+  border: 1px solid var(--line);
+  padding: 22px;
+  border-radius: 8px;
+  margin-top: 12px;
+}
+.ai-generation-footer {
+  flex-wrap: wrap;
+}
+@media (max-width: 760px) {
+  .ai-editor-actions > .ant-btn {
+    flex: 1 1 calc(50% - 5px);
+    min-width: 0;
+  }
+  .ai-candidate {
+    padding: 16px;
+  }
+}
 .delivery-account-picker {
   margin-top: 24px;
 }

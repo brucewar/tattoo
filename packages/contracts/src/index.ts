@@ -307,3 +307,5 @@ export type Delivery = {
   revision: { id: string; title: string; version: number; articleId: string };
 };
 export const initialDocument: DocumentNode = { type: 'doc', content: [{ type: 'paragraph' }] };
+
+export * from './ai';

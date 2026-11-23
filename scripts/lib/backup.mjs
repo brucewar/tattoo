@@ -396,6 +396,8 @@ const accountCheck = `
       box.decrypt(row.secretEncrypted);
       if (row.tokenEncrypted) box.decrypt(row.tokenEncrypted);
     }
+    const models = await db.query('SELECT "apiKeyEncrypted" FROM "AiModel"');
+    for (const row of models.rows) if (row.apiKeyEncrypted) box.decrypt(row.apiKeyEncrypted);
     console.log('ACCOUNT_KEYS_OK');
   } finally { await db.end(); }
 `;
@@ -496,6 +498,10 @@ export const restoredTasksSql = `
   )
   INSERT INTO "DeliveryEvent" (id, "deliveryId", actor, message, "createdAt")
     SELECT gen_random_uuid(), id, 'restore', '恢复备份后暂停旧任务；须停止原实例 Worker 并人工核对，再显式重试', CURRENT_TIMESTAMP FROM affected;
+  UPDATE "GenerationJob" SET state='UNCERTAIN',
+    error='备份恢复后已暂停旧生成任务；原实例可能已调用模型，请核对结果后显式重新生成',
+    "executionId"=NULL, "heartbeatAt"=NULL, "completedAt"=CURRENT_TIMESTAMP, "updatedAt"=CURRENT_TIMESTAMP
+    WHERE state IN ('QUEUED', 'RUNNING');
   COMMIT;
 `;
 

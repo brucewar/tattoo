@@ -1,0 +1,512 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdtemp, readdir, readFile, realpath, rm } from 'node:fs/promises';
+import { createServer, type Server } from 'node:http';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { PrismaClient } from '@prisma/client';
+import type {
+  AiGenerationInput,
+  AiGenerationJob,
+  AiModelConfig,
+  AiModels,
+  Article,
+} from '@tattoo/contracts';
+import { Client } from 'pg';
+import sharp from 'sharp';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { AiService } from '../../apps/server/src/ai/service';
+import { AssetsService } from '../../apps/server/src/assets/service';
+import { loadConfig, type Config } from '../../apps/server/src/config';
+import type { Database } from '../../apps/server/src/database';
+import { SecretBox } from '../../apps/server/src/security';
+import { createAiMock, type AiMockMode } from '../helpers/ai-mock.mjs';
+
+const databaseUrl = process.env.TEST_DATABASE_URL;
+if (!databaseUrl || !/test/i.test(new URL(databaseUrl).pathname))
+  throw new Error('AI 集成测试只允许专用测试库');
+const schema = `tattoo_ai_${randomUUID().replaceAll('-', '')}`;
+const scopedUrl = new URL(databaseUrl);
+scopedUrl.searchParams.set('schema', schema);
+const connection = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 10000 });
+const email = 'ai-integration@example.com';
+const password = 'ai-integration-test-password';
+const textKey = 'ai-text-test-key-never-real';
+const imageKey = 'ai-image-test-key-never-real';
+const encryptionKey = Buffer.alloc(32, 21).toString('base64');
+let database: PrismaClient;
+let ai: AiService;
+let config: Config;
+let mock: Server | undefined;
+let model: ReturnType<typeof createAiMock>;
+let api: ChildProcess | undefined;
+let apiLogs = '';
+let origin = '';
+let modelBaseUrl = '';
+let cookie = '';
+let createdSchema = false;
+let storage = '';
+let temporaryRoot = '';
+const processing = new Set<Promise<boolean>>();
+
+function request(path: string, method = 'GET', body?: unknown, session = cookie) {
+  return fetch(origin + '/api/v1' + path, {
+    method,
+    headers: {
+      ...(session ? { Cookie: session } : {}),
+      ...(method !== 'GET'
+        ? { Origin: origin, 'X-Tattoo-Request': '1', 'Content-Type': 'application/json' }
+        : {}),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    signal: AbortSignal.timeout(15000),
+  });
+}
+
+async function data<T>(response: Response): Promise<T> {
+  const body = (await response.json()) as { data: T; error?: unknown };
+  expect(response.ok, JSON.stringify(body)).toBe(true);
+  return body.data;
+}
+
+async function configure(capability: 'text' | 'image', overrides: Record<string, unknown> = {}) {
+  return data<AiModelConfig>(
+    await request('/ai/models/' + capability, 'PUT', {
+      baseUrl: modelBaseUrl,
+      model: `test-${capability}-model`,
+      apiKey: capability === 'text' ? textKey : imageKey,
+      imageSize: capability === 'image' ? '1536x1024' : '',
+      imageResponseFormat: 'auto',
+      ...overrides,
+    }),
+  );
+}
+
+async function enqueue(kind: AiGenerationInput['kind'], overrides: Record<string, unknown> = {}) {
+  return data<AiGenerationJob>(
+    await request('/ai/jobs', 'POST', {
+      requestKey: randomUUID(),
+      kind,
+      prompt: kind.startsWith('TEST_') ? '' : '请生成一份可编辑的本地测试内容',
+      ...(kind === 'REWRITE' ? { sourceText: '等待改写的原文。' } : {}),
+      ...overrides,
+    }),
+  );
+}
+
+async function getJob(id: string) {
+  return data<AiGenerationJob>(await request('/ai/jobs/' + id));
+}
+
+function processNext() {
+  const running = ai.processNext(async () => undefined);
+  processing.add(running);
+  void running.finally(() => processing.delete(running)).catch(() => undefined);
+  return running;
+}
+
+async function unusedPort() {
+  const server = createServer();
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('无法分配 AI 测试端口');
+  await new Promise<void>((done) => server.close(() => done()));
+  return address.port;
+}
+
+beforeAll(async () => {
+  await connection.connect();
+  await connection.query(`CREATE SCHEMA "${schema}"`);
+  createdSchema = true;
+  await connection.query(`SET search_path TO "${schema}"`);
+  const migrations = resolve('apps/server/prisma/migrations');
+  for (const item of (await readdir(migrations, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .sort((a, b) => a.name.localeCompare(b.name)))
+    await connection.query(await readFile(join(migrations, item.name, 'migration.sql'), 'utf8'));
+  database = new PrismaClient({ datasources: { db: { url: scopedUrl.toString() } } });
+  await database.$connect();
+  temporaryRoot = await realpath(tmpdir());
+  storage = await mkdtemp(join(temporaryRoot, 'tattoo-ai-integration-'));
+  model = createAiMock(
+    await sharp({ create: { width: 240, height: 140, channels: 3, background: '#476b5a' } })
+      .png()
+      .toBuffer(),
+  );
+  mock = createServer(async (incoming, outgoing) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
+    const pathname = new URL(incoming.url ?? '/', 'http://mock.local').pathname;
+    outgoing.setHeader('Content-Type', 'application/json');
+    if (!(await model.handle(incoming, outgoing, pathname, Buffer.concat(chunks)))) {
+      outgoing.statusCode = 404;
+      outgoing.end(JSON.stringify({ error: 'unexpected model path' }));
+    }
+  });
+  await new Promise<void>((done) => mock!.listen(0, '127.0.0.1', done));
+  const address = mock.address();
+  if (!address || typeof address === 'string') throw new Error('模型接口未监听');
+  modelBaseUrl = `http://127.0.0.1:${address.port}/v1`;
+  const apiPort = await unusedPort();
+  origin = `http://127.0.0.1:${apiPort}`;
+  const env = {
+    ...process.env,
+    NODE_ENV: 'test',
+    DATABASE_URL: scopedUrl.toString(),
+    APP_ENCRYPTION_KEY: encryptionKey,
+    APP_ORIGIN: origin,
+    PORT: String(apiPort),
+    STORAGE_PATH: storage,
+    ADMIN_EMAIL: email,
+    ADMIN_PASSWORD: password,
+    COOKIE_SECURE: 'false',
+    REMOTE_WRITES_ENABLED: 'false',
+  };
+  config = loadConfig(env);
+  ai = new AiService(database as Database, config, new AssetsService(database as Database, config));
+  api = spawn(process.execPath, [resolve('apps/server/dist/main.js')], {
+    cwd: resolve('.'),
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  for (const output of [api.stdout, api.stderr])
+    output?.on('data', (chunk: Buffer) => {
+      apiLogs = (apiLogs + chunk.toString('utf8')).slice(-32768);
+    });
+  const deadline = Date.now() + 60000;
+  let ready = false;
+  while (Date.now() < deadline) {
+    if (api.exitCode !== null) throw new Error('AI API 提前退出：' + apiLogs);
+    try {
+      ready = (await fetch(origin + '/api/v1/health/ready', { signal: AbortSignal.timeout(1000) }))
+        .ok;
+    } catch {}
+    if (ready) break;
+    await sleep(100);
+  }
+  if (!ready) throw new Error('AI API 就绪超时：' + apiLogs);
+  const login = await request('/auth/login', 'POST', { email, password }, '');
+  await data(login);
+  cookie = (login.headers.get('set-cookie') ?? '').split(';')[0]!;
+}, 90000);
+
+afterEach(async () => {
+  model?.releaseAll();
+  await Promise.allSettled([...processing]);
+  model?.setNext({ nextText: 'success', nextImage: 'success' });
+  await database?.generationJob.updateMany({
+    where: { state: { in: ['QUEUED', 'RUNNING'] } },
+    data: { state: 'FAILED', executionId: null },
+  });
+}, 35000);
+
+afterAll(async () => {
+  if (api && api.exitCode === null && api.signalCode === null) {
+    const exited = new Promise<void>((done) => api!.once('exit', () => done()));
+    api.kill('SIGKILL');
+    await Promise.race([
+      exited,
+      sleep(5000).then(() => {
+        throw new Error('AI API 未及时退出');
+      }),
+    ]);
+  }
+  model?.releaseAll();
+  if (mock) {
+    mock.closeAllConnections();
+    await new Promise<void>((done) => mock!.close(() => done()));
+  }
+  await database?.$disconnect();
+  if (createdSchema) {
+    if (!/^tattoo_ai_[0-9a-f]{32}$/.test(schema)) throw new Error('AI schema 清理范围无效');
+    await connection.query(`DROP SCHEMA "${schema}" CASCADE`);
+  }
+  await connection.end();
+  if (storage) {
+    if (
+      dirname(storage) !== temporaryRoot ||
+      !basename(storage).startsWith('tattoo-ai-integration-')
+    )
+      throw new Error('AI 素材清理范围无效');
+    await rm(storage, { recursive: true });
+  }
+}, 15000);
+
+describe('AI 配置与生成 / 真实 API、PostgreSQL 和隔离模型接口', () => {
+  it('配置、生成与记录必须登录，跨站写被拒绝，未配置时不创建任务', async () => {
+    expect((await request('/ai/models', 'GET', undefined, '')).status).toBe(401);
+    expect((await request('/ai/jobs', 'GET', undefined, '')).status).toBe(401);
+    expect((await request('/ai/models/text', 'PUT', {}, '')).status).toBe(401);
+    const crossSite = await fetch(origin + '/api/v1/ai/models/text', {
+      method: 'PUT',
+      headers: {
+        Cookie: cookie,
+        Origin: 'https://foreign.example',
+        'X-Tattoo-Request': '1',
+        'Content-Type': 'application/json',
+      },
+      body: '{}',
+    });
+    expect(crossSite.status).toBe(403);
+    expect(
+      (
+        await request('/ai/models/text', 'PUT', {
+          baseUrl: 'file:///secret',
+          model: 'test',
+          apiKey: textKey,
+        })
+      ).status,
+    ).toBe(400);
+    const missing = await request('/ai/jobs', 'POST', {
+      requestKey: randomUUID(),
+      kind: 'ARTICLE',
+      prompt: '测试文章',
+    });
+    expect(missing.status).toBe(400);
+    expect(await database.generationJob.count()).toBe(0);
+    expect(model.calls).toEqual({ text: 0, image: 0 });
+  });
+
+  it('文本和图片配置分别加密、脱敏与持久保存，空密钥保留原值', async () => {
+    const text = await configure('text');
+    await configure('image');
+    expect(text.hasApiKey).toBe(true);
+    const publicResponse = await request('/ai/models');
+    const body = await publicResponse.text();
+    expect(body).not.toContain(textKey);
+    expect(body).not.toContain(imageKey);
+    expect(body).not.toContain('apiKeyEncrypted');
+    const stored = await database.aiModel.findUniqueOrThrow({ where: { capability: 'text' } });
+    expect(stored.apiKeyEncrypted).not.toBe(textKey);
+    expect(new SecretBox(encryptionKey).decrypt(stored.apiKeyEncrypted)).toBe(textKey);
+    const updated = await configure('text', { apiKey: '', model: 'test-text-model-updated' });
+    expect(updated.version).toBe(text.version + 1);
+    expect(
+      new SecretBox(encryptionKey).decrypt(
+        (await database.aiModel.findUniqueOrThrow({ where: { capability: 'text' } }))
+          .apiKeyEncrypted,
+      ),
+    ).toBe(textKey);
+    const list = await data<AiModels>(await request('/ai/models'));
+    expect(list.text?.model).toBe('test-text-model-updated');
+    expect(list.image?.model).toBe('test-image-model');
+  });
+
+  it('分别实际验证文本和图片能力，关闭微信写入也能生成，生成结果不自动改文章或投递', async () => {
+    await configure('text');
+    await configure('image');
+    const counts = {
+      articles: await database.article.count(),
+      revisions: await database.revision.count(),
+      deliveries: await database.delivery.count(),
+    };
+    const text = await enqueue('TEST_TEXT');
+    expect(text.state).toBe('QUEUED');
+    expect(await processNext()).toBe(true);
+    expect((await getJob(text.id)).result).toEqual({ type: 'text', text: '模型文字验证成功' });
+    let list = await data<AiModels>(await request('/ai/models'));
+    expect(list.text?.lastValidation?.state).toBe('SUCCEEDED');
+    expect(list.image?.lastValidation).toBeNull();
+    const image = await enqueue('TEST_IMAGE', { sourceText: '图片验证不应携带这段文章参考' });
+    await processNext();
+    const completed = await getJob(image.id);
+    expect(completed.state).toBe('SUCCEEDED');
+    expect(completed.result?.type).toBe('image');
+    if (completed.result?.type !== 'image') throw new Error('图片结果缺失');
+    const asset = await request('/assets/' + completed.result.asset.id);
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get('content-type')).toContain('image/png');
+    expect(await sharp(Buffer.from(await asset.arrayBuffer())).metadata()).toMatchObject({
+      width: 240,
+      height: 140,
+    });
+    list = await data<AiModels>(await request('/ai/models'));
+    expect(list.image?.lastValidation?.state).toBe('SUCCEEDED');
+    const imageRequest = model.requests.at(-1)!;
+    expect(imageRequest.authorizationHash).toBe(
+      createHash('sha256')
+        .update('Bearer ' + imageKey)
+        .digest('hex'),
+    );
+    expect(imageRequest.responseFormat).toBeNull();
+    expect(imageRequest.size).toBe('1536x1024');
+    expect(imageRequest.prompt).not.toContain('图片验证不应携带这段文章参考');
+    expect({
+      articles: await database.article.count(),
+      revisions: await database.revision.count(),
+      deliveries: await database.delivery.count(),
+    }).toEqual(counts);
+  });
+
+  it('切换模型服务来源不能静默转发旧密钥，明确清除后才可保存无密钥服务', async () => {
+    const original = await configure('text');
+    const otherOrigin = 'https://different-model-provider.invalid/v1';
+    const changed = { baseUrl: otherOrigin, model: 'other-text-model', apiKey: '' };
+    expect((await request('/ai/models/text', 'PUT', changed)).status).toBe(400);
+    let current = (await data<AiModels>(await request('/ai/models'))).text!;
+    expect(current.baseUrl).toBe(original.baseUrl);
+    expect(current.version).toBe(original.version);
+    expect(current.hasApiKey).toBe(true);
+    expect(
+      (await request('/ai/models/text', 'PUT', { ...changed, apiKey: textKey, clearApiKey: true }))
+        .status,
+    ).toBe(400);
+    const cleared = await data<AiModelConfig>(
+      await request('/ai/models/text', 'PUT', { ...changed, clearApiKey: true }),
+    );
+    expect(cleared.baseUrl).toBe(otherOrigin);
+    expect(cleared.hasApiKey).toBe(false);
+    expect(
+      (await database.aiModel.findUniqueOrThrow({ where: { capability: 'text' } })).apiKeyEncrypted,
+    ).toBe('');
+    current = await configure('text');
+    expect(current.baseUrl).toBe(original.baseUrl);
+    expect(current.hasApiKey).toBe(true);
+  });
+
+  it('重复请求只执行一次，冲突请求被拒绝，候选需要明确保存才进入文章修订', async () => {
+    await configure('text');
+    const input = { requestKey: randomUUID(), kind: 'ARTICLE', prompt: '写一篇关于内容创作的文章' };
+    const responses = await Promise.all([
+      request('/ai/jobs', 'POST', input),
+      request('/ai/jobs', 'POST', input),
+    ]);
+    const jobs = await Promise.all(responses.map((response) => data<AiGenerationJob>(response)));
+    expect(jobs[0]!.id).toBe(jobs[1]!.id);
+    expect(await database.generationJob.count({ where: { requestKey: input.requestKey } })).toBe(1);
+    expect(
+      (await request('/ai/jobs', 'POST', { ...input, prompt: '不能偷偷替换同一请求的要求' }))
+        .status,
+    ).toBe(409);
+    const count = await database.article.count();
+    const before = model.calls.text;
+    await processNext();
+    const job = await getJob(jobs[0]!.id);
+    expect(job.state).toBe('SUCCEEDED');
+    expect(job.result?.type).toBe('article');
+    expect(await database.article.count()).toBe(count);
+    expect(await processNext()).toBe(false);
+    expect(model.calls.text).toBe(before + 1);
+    if (job.result?.type !== 'article') throw new Error('文章候选缺失');
+    const article = await data<Article>(
+      await request('/articles', 'POST', {
+        title: job.result.title,
+        digest: job.result.digest,
+        document: job.result.document,
+        author: 'AI 测试作者',
+        sourceUrl: '',
+        coverId: null,
+      }),
+    );
+    expect(article.title).toBe('AI 生成测试文章');
+    expect(article.version).toBe(1);
+    expect(JSON.stringify(article.document)).toContain('人工审阅后保存');
+    expect(await database.delivery.count()).toBe(0);
+  });
+
+  it.each([
+    ['text', 'malformed', 'ARTICLE', 'FAILED'],
+    ['text', 'refused', 'TEST_TEXT', 'FAILED'],
+    ['text', 'disconnect', 'TEST_TEXT', 'UNCERTAIN'],
+    ['image', 'invalid-image', 'COVER', 'FAILED'],
+  ] as const)(
+    '%s %s 失败可见，未显式重新生成不会再次调用',
+    async (capability, mode, kind, expected) => {
+      await configure(capability);
+      model.setNext(
+        capability === 'text'
+          ? { nextText: mode as AiMockMode }
+          : { nextImage: mode as AiMockMode },
+      );
+      const job = await enqueue(kind);
+      const before = model.calls[capability];
+      await processNext();
+      const completed = await getJob(job.id);
+      expect(completed.state).toBe(expected);
+      expect(completed.error).toBeTruthy();
+      expect(JSON.stringify(completed)).not.toContain(textKey);
+      expect(JSON.stringify(completed)).not.toContain(imageKey);
+      expect(await processNext()).toBe(false);
+      expect(model.calls[capability]).toBe(before + 1);
+    },
+  );
+
+  it('排队后配置发生变化时明确失败，不静默切换模型或凭据', async () => {
+    await configure('text');
+    const job = await enqueue('ARTICLE');
+    const before = model.calls.text;
+    await configure('text', { model: 'a-different-model' });
+    await processNext();
+    const completed = await getJob(job.id);
+    expect(completed.state).toBe('FAILED');
+    expect(completed.error).toMatch(/配置|变化|更改/);
+    expect(model.calls.text).toBe(before);
+  });
+
+  it('显式重新生成使用新意图，保留失败结果，图片 URL 结果也保存为本地受保护素材', async () => {
+    await configure('image', { imageResponseFormat: 'url' });
+    model.setNext({ nextImage: 'refused' });
+    const failed = await enqueue('ILLUSTRATION');
+    const before = model.calls.image;
+    await processNext();
+    expect((await getJob(failed.id)).state).toBe('FAILED');
+    model.setNext({ nextImage: 'url' });
+    const retry = await enqueue('ILLUSTRATION', { sourceText: '插图应参考这段已编辑的正文内容' });
+    expect(retry.id).not.toBe(failed.id);
+    await processNext();
+    const completed = await getJob(retry.id);
+    expect(completed.state).toBe('SUCCEEDED');
+    expect(completed.result?.type).toBe('image');
+    expect((await getJob(failed.id)).state).toBe('FAILED');
+    expect(model.calls.image).toBe(before + 2);
+    expect(model.requests.at(-1)?.responseFormat).toBe('url');
+    expect(model.requests.at(-1)?.prompt).toContain('插图应参考这段已编辑的正文内容');
+    if (completed.result?.type !== 'image') throw new Error('插图结果缺失');
+    expect(completed.result.asset.url).toBe('/api/v1/assets/' + completed.result.asset.id);
+    expect(
+      (await request('/assets/' + completed.result.asset.id, 'GET', undefined, '')).status,
+    ).toBe(401);
+  });
+
+  it('生成执行时拒绝修改同一模型配置，完成后才能轮换', async () => {
+    await configure('text');
+    model.setNext({ nextText: 'hold' });
+    const job = await enqueue('TEST_TEXT');
+    const before = model.calls.text;
+    const running = processNext();
+    await expect.poll(() => model.calls.text).toBe(before + 1);
+    expect((await getJob(job.id)).state).toBe('RUNNING');
+    const changed = await request('/ai/models/text', 'PUT', {
+      baseUrl: modelBaseUrl,
+      model: 'changed-while-running',
+      apiKey: textKey,
+    });
+    expect(changed.status).toBe(409);
+    model.releaseAll();
+    await running;
+    expect((await getJob(job.id)).state).toBe('SUCCEEDED');
+    await configure('text', { model: 'changed-after-running' });
+  }, 25000);
+
+  it('恢复把执行中生成标记待核对，迟到执行者不能再提交结果，排队任务仍可显式运行', async () => {
+    await configure('text');
+    model.setNext({ nextText: 'hold' });
+    const first = await enqueue('TEST_TEXT');
+    const before = model.calls.text;
+    const running = processNext();
+    await expect.poll(() => model.calls.text).toBe(before + 1);
+    const queued = await enqueue('TEST_TEXT');
+    await ai.recover();
+    expect((await getJob(first.id)).state).toBe('UNCERTAIN');
+    expect((await getJob(queued.id)).state).toBe('QUEUED');
+    model.releaseAll();
+    await running;
+    expect((await getJob(first.id)).state).toBe('UNCERTAIN');
+    expect((await getJob(first.id)).result).toBeNull();
+    await processNext();
+    expect((await getJob(queued.id)).state).toBe('SUCCEEDED');
+    expect(model.calls.text).toBe(before + 2);
+  }, 25000);
+});

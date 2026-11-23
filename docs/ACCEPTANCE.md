@@ -6,6 +6,8 @@
 
 P5 候选实现 `8bf5fea` 的 [CI](https://github.com/brucewar/tattoo/actions/runs/44695790900) 已通过 114 项单元、43 项 PostgreSQL 集成、14 项浏览器及真实 Docker 恢复演练，补齐 AT-01 至 AT-08 的自动验收证据。详情与本地失败/未执行项见 [P5 验证记录](P5-VERIFICATION.md)；AT-09 仍未执行。
 
+本轮 P6–P8 的模型配置、生成、采用保护及模型密钥恢复检查见 [AI 创作验证记录](P6-P8-VERIFICATION.md)。真实模型调用未执行，不与既有模拟接口检查或真实微信权限混算。
+
 验收对象是标准 Docker 部署；记录实际执行的平台，不要求特定 NAS 型号。已验证 Linux/amd64，其他平台未实测时注明范围。真实微信公众号验收仍需用户在自己的环境显式完成。
 
 ## AT 对照

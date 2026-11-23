@@ -45,7 +45,8 @@ const wrongKey = randomBytes(32).toString('base64');
 const adminEmail = 'p5-recovery@example.com';
 const adminPassword = randomBytes(24).toString('base64url');
 const accountSecret = 'p5-only-fake-' + randomBytes(24).toString('hex');
-const secrets = [key, wrongKey, adminPassword, accountSecret];
+const aiSecret = 'p6-only-fake-' + randomBytes(24).toString('hex');
+const secrets = [key, wrongKey, adminPassword, accountSecret, aiSecret];
 const cleanupErrors = [];
 let temporaryRoot;
 let directory;
@@ -307,6 +308,24 @@ async function checkRestored(fixture) {
         assert.equal(await db.session.count(), 0);
         const account = await db.account.findUniqueOrThrow({ where: { id: fixture.accountId } });
         assert.equal(new SecretBox(process.env.APP_ENCRYPTION_KEY).decrypt(account.secretEncrypted), fixture.secret);
+        const model = await db.aiModel.findUniqueOrThrow({ where: { capability: 'text' } });
+        assert.equal(new SecretBox(process.env.APP_ENCRYPTION_KEY).decrypt(model.apiKeyEncrypted), fixture.aiSecret);
+        const generationJobs = await db.generationJob.findMany({ where: { modelId: model.id } });
+        assert.equal(generationJobs.length, fixture.generationJobs.length);
+        for (const expected of fixture.generationJobs) {
+          const actual = generationJobs.find((row) => row.id === expected.id);
+          assert.ok(actual);
+          assert.equal(actual.model, 'recovery-text-fixture');
+          if (['QUEUED', 'RUNNING'].includes(expected.state)) {
+            assert.equal(actual.state, 'UNCERTAIN');
+            assert.equal(actual.executionId, null);
+            assert.equal(actual.heartbeatAt, null);
+            assert.match(actual.error, /恢复/);
+          } else {
+            assert.equal(actual.state, expected.state);
+            assert.deepEqual(actual.result, expected.result);
+          }
+        }
         const article = await db.article.findUniqueOrThrow({ where: { id: fixture.articleId }, include: { revisions: { orderBy: { version: 'asc' } } } });
         assert.equal(article.version, fixture.revisions.length);
         assert.deepEqual(article.revisions.map(({ id, title, version }) => ({ id, title, version })), fixture.revisions);
@@ -337,7 +356,7 @@ async function checkRestored(fixture) {
             assert.equal(actual.events.filter((event) => event.actor === 'restore').length, 0);
           }
         }
-        console.log(JSON.stringify({ article: article.id, revisions: article.revisions.map(({ id, title, version }) => ({ id, title, version })), asset: { id: asset.id, sha256: createHash('sha256').update(bytes).digest('hex') }, mappings, deliveries: deliveries.map(({ id, state, stage, remoteId, executionId, events, attempts }) => ({ id, state, stage, remoteId, executionId, events, attempts })) }));
+        console.log(JSON.stringify({ article: article.id, revisions: article.revisions.map(({ id, title, version }) => ({ id, title, version })), asset: { id: asset.id, sha256: createHash('sha256').update(bytes).digest('hex') }, mappings, deliveries: deliveries.map(({ id, state, stage, remoteId, executionId, events, attempts }) => ({ id, state, stage, remoteId, executionId, events, attempts })), generationJobs: generationJobs.map(({ id, state, model }) => ({ id, state, model })) }));
       } finally { await db.$disconnect(); }
     `,
   );
@@ -445,6 +464,23 @@ try {
     });
     articles.push((await response.json()).data);
   }
+  // AI is independent of the WeChat write switch. Stop this owned Worker before
+  // seeding old generation jobs so this recovery exercise never calls a real model.
+  await compose(source, ['stop', '--timeout', '45', 'worker']);
+  await http(source, '/ai/models/text', {
+    method: 'PUT',
+    cookie: sourceCookie,
+    json: {
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'recovery-text-fixture',
+      apiKey: aiSecret,
+    },
+  });
+  const generationJobs = ['QUEUED', 'RUNNING', 'UNCERTAIN', 'FAILED', 'SUCCEEDED'].map((state) => ({
+    id: randomUUID(),
+    state,
+    result: state === 'SUCCEEDED' ? { type: 'text', text: '恢复前的生成结果' } : null,
+  }));
   const deliveries = ['QUEUED', 'RUNNING', 'UNCERTAIN', 'FAILED', 'SUCCEEDED'].map(
     (state, index) => ({
       id: randomUUID(),
@@ -457,6 +493,8 @@ try {
   const fixture = {
     accountId: account.id,
     secret: accountSecret,
+    aiSecret,
+    generationJobs,
     articleId: articles[0].id,
     assetId: asset.id,
     assetDigest,
@@ -476,6 +514,19 @@ try {
       const fixture = ${JSON.stringify(fixture)};
       const db = new PrismaClient();
       try {
+        const model = await db.aiModel.findUniqueOrThrow({ where: { capability: 'text' } });
+        for (const row of fixture.generationJobs) {
+          await db.generationJob.create({ data: {
+            id: row.id, requestKey: randomUUID(), kind: 'TEST_TEXT', capability: 'text',
+            modelId: model.id, model: model.model, configVersion: model.version,
+            inputHash: 'recovery-fixture', prompt: '恢复验收，仅准备旧任务，不发出模型请求',
+            state: row.state,
+            executionId: row.state === 'RUNNING' ? randomUUID() : null,
+            heartbeatAt: row.state === 'RUNNING' ? new Date() : null,
+            completedAt: ['UNCERTAIN', 'FAILED', 'SUCCEEDED'].includes(row.state) ? new Date() : null,
+            ...(row.result ? { result: row.result } : {}),
+          } });
+        }
         for (const row of fixture.deliveries) {
           const attemptId = randomUUID();
           await db.delivery.create({ data: {
@@ -498,7 +549,9 @@ try {
       } finally { await db.$disconnect(); }
     `,
   );
-  console.info('PASS: 真实 HTTP 创建账号、图片和 6 份修订；写入禁用的 Worker 下保留五种投递状态');
+  console.info(
+    'PASS: 真实 HTTP 创建账号、图片、6 份修订和模型配置；停止 Worker 后准备五种投递与生成状态，无真实模型调用',
+  );
 
   const backupDirectory = join(directory, 'backup');
   await backupCommand(source, backupDirectory);
@@ -560,7 +613,7 @@ try {
   assert.notEqual((await restoreCommand(backupDirectory, target.envFile, true)).code, 0);
   assert.deepEqual(await checkRestored(fixture), restored);
   console.info(
-    'PASS: 空实例恢复后凭证可解密、会话撤销、图文与历史完整，旧任务待核对；拒绝覆盖非空目标',
+    'PASS: 空实例恢复后公众号及模型密钥可解密、会话撤销、图文与历史完整，旧投递和生成任务冻结；拒绝覆盖非空目标',
   );
 
   await compose(target, ['up', '-d', '--wait', '--wait-timeout', '180', 'api', 'web']);
@@ -569,6 +622,13 @@ try {
   const targetCookie = await login(target);
   const me = await (await http(target, '/auth/me', { cookie: targetCookie })).json();
   assert.equal(me.data.remoteWritesEnabled, false);
+  const restoredModelsText = await (
+    await http(target, '/ai/models', { cookie: targetCookie })
+  ).text();
+  assert.ok(!restoredModelsText.includes(aiSecret));
+  const restoredModels = JSON.parse(restoredModelsText).data;
+  assert.equal(restoredModels.text.model, 'recovery-text-fixture');
+  assert.equal(restoredModels.text.hasApiKey, true);
   const current = (
     await (await http(target, '/articles/' + fixture.articleId, { cookie: targetCookie })).json()
   ).data;
