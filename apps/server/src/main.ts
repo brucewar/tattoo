@@ -1,23 +1,30 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import helmet from 'helmet';
 import { json, raw } from 'express';
+import { resolve } from 'node:path';
 import { AppModule } from './app.module';
 import { loadConfig } from './config';
 import { PublicErrorFilter } from './http';
+import { installWeb } from './web';
 
 async function main() {
   const config = loadConfig();
   const app = await NestFactory.create(AppModule, { logger: ['warn', 'error'], bodyParser: false });
   app.setGlobalPrefix('api/v1');
-  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+  // The container is now the public entry; untrusted forwarded headers must not
+  // let a direct client evade the login limit by inventing a different address.
+  app.getHttpAdapter().getInstance().set('trust proxy', false);
   app.use((_request: unknown, response: import('express').Response, next: () => void) => {
     response.setHeader('Cache-Control', 'no-store');
     next();
   });
   app.use('/api/v1/assets', raw({ type: () => true, limit: 10 * 1024 * 1024 }));
   app.use(json({ limit: 2 * 1024 * 1024 }));
-  app.use(helmet());
+  installWeb(
+    app.getHttpAdapter().getInstance(),
+    resolve(__dirname, '../../web/dist'),
+    config.NODE_ENV === 'production',
+  );
   app.useGlobalFilters(new PublicErrorFilter());
   app.enableShutdownHooks();
   await app.listen(config.PORT, '0.0.0.0');

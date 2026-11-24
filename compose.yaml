@@ -19,6 +19,8 @@ services:
     build:
       context: .
       target: application
+    ports:
+      - '${WEB_PORT:-8080}:3000'
     environment: &application-environment
       NODE_ENV: production
       DATABASE_URL: postgresql://tattoo:${POSTGRES_PASSWORD:?Run npm run setup first}@postgres:5432/tattoo
@@ -64,22 +66,6 @@ services:
           "const fs=require('node:fs');try{process.exit(Date.now()-fs.statSync('/tmp/tattoo-worker-health').mtimeMs<20000?0:1)}catch{process.exit(1)}",
         ]
       interval: 5s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-  web:
-    image: tattoo-web:${TATTOO_VERSION:-local}
-    build:
-      context: .
-      target: web
-    ports:
-      - '${WEB_PORT:-8080}:8080'
-    depends_on:
-      api:
-        condition: service_healthy
-    healthcheck:
-      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1:8080/']
-      interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped

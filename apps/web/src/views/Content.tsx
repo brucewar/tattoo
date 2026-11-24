@@ -4,6 +4,7 @@ import type { ArticleSummary } from '@tattoo/contracts';
 import { api, errorMessage } from '../api';
 import { date, type Page } from '../ui';
 import { ArticleEditor } from '../components/ArticleEditor';
+import { TopicCreation } from '../components/ai/TopicCreation';
 
 export function Content({
   onDirtyChange,
@@ -23,6 +24,7 @@ export function Content({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [creatingTopic, setCreatingTopic] = useState(false);
   useEffect(() => {
     if (selected !== undefined) return;
     const controller = new AbortController();
@@ -62,11 +64,14 @@ export function Content({
         <div>
           <p className="eyebrow">从一篇好内容开始</p>
           <h1>内容</h1>
-          <p className="secondary">写作、整理图片，保存可以随时回看的修订。</p>
+          <p className="secondary">从主题生成图文，或自己写作；保存可以随时回看的修订。</p>
         </div>
-        <Button type="primary" onClick={() => setSelected(null)}>
-          新建文章
-        </Button>
+        <div className="heading-actions">
+          <Button type="primary" onClick={() => setCreatingTopic(true)}>
+            主题创作
+          </Button>
+          <Button onClick={() => setSelected(null)}>新建文章</Button>
+        </div>
       </div>
       {error && (
         <Alert
@@ -89,7 +94,7 @@ export function Content({
         ) : !items.length ? (
           <div className="empty-content">
             <Empty description="还没有文章" />
-            <p className="secondary">从空白开始，逐步把想法写成文章。</p>
+            <p className="secondary">输入一个主题，让 AI 生成文章和封面；也可以新建文章自己写。</p>
           </div>
         ) : (
           <div className="content-list">
@@ -121,6 +126,15 @@ export function Content({
           onChange={setPage}
         />
       )}
+      <TopicCreation
+        open={creatingTopic}
+        onClose={() => {
+          setCreatingTopic(false);
+          setVersion((current) => current + 1);
+        }}
+        onOpenArticle={setSelected}
+        onConfigureModels={onConfigureModels}
+      />
     </>
   );
 }

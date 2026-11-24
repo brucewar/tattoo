@@ -32,7 +32,7 @@ node scripts/configure.mjs
 | `APP_ENCRYPTION_KEY`             | 生成的 32 字节主密钥，供已保存账号解密；独立备份，升级时保持不变。                                    |
 | `POSTGRES_PASSWORD`              | 生成的数据库密码。保留部署配置，不随意修改已有数据库的连接密码。                                      |
 | `REMOTE_WRITES_ENABLED`          | 首次保持 `false`，真实测试草稿前再显式开启。                                                          |
-| `TATTOO_VERSION`                 | 应用与 Web 的镜像标签。建议填写已检出的提交短哈希，避免不同版本反复覆盖 `local` 标签。                |
+| `TATTOO_VERSION`                 | 单一应用镜像的标签，API 与 Worker 共用。建议填写已检出的提交短哈希，避免反复覆盖 `local` 标签。       |
 
 ```bash
 docker compose -p tattoo --env-file .env config --quiet
@@ -42,9 +42,9 @@ docker compose -p tattoo --env-file .env ps
 docker compose -p tattoo --env-file .env images
 ```
 
-`up --wait` 等待服务运行或健康。API 启动前应用版本化迁移，迁移失败不启动 HTTP；Worker 等 API 健康后启动。API 和 Worker 使用同一个应用镜像，固定一个 Worker。只有 Web 发布宿主端口；数据库与素材分别放在命名卷中。[Compose up](https://docs.docker.com/reference/cli/docker/compose/up/)
+`up --wait` 等待服务运行或健康。API 启动前应用版本化迁移，迁移失败不启动 HTTP；Worker 等 API 健康后启动。前端页面包含在应用镜像内，由 API 同源提供；API 和 Worker 共用镜像，固定一个 Worker。Compose 共三个容器，只有 API 发布宿主 Web 端口；数据库与素材分别放在命名卷中。[Compose up](https://docs.docker.com/reference/cli/docker/compose/up/)
 
-记录源码提交、应用与 Web 的镜像 ID、Docker / Compose 版本和实际平台。镜像应匹配 Docker 主机的平台；多平台构建能力不等于本项目已经发布或实测所有平台的镜像。[Docker 多平台镜像](https://docs.docker.com/build/building/multi-platform/)
+记录源码提交、应用镜像 ID、Docker / Compose 版本和实际平台。镜像应匹配 Docker 主机的平台；多平台构建能力不等于本项目已经发布或实测所有平台的镜像。[Docker 多平台镜像](https://docs.docker.com/build/building/multi-platform/)
 
 默认项目名是 `tattoo`。使用其他项目名时，后续备份、日志、停机和恢复命令也要显式使用该名称。`-p` 优先于配置文件中的 `name:`；环境文件可用 `--env-file` 指定，Shell 环境变量可能覆盖文件内的值。[Compose 项目与参数](https://docs.docker.com/reference/cli/docker/compose/)、[环境变量优先级](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)
 
@@ -53,10 +53,10 @@ docker compose -p tattoo --env-file .env images
 局域网访问时，将 `APP_ORIGIN` 设置为实际访问的 `http://主机:端口`，并只向所需网络开放 Web 端口。改动后重新创建应用容器：
 
 ```bash
-docker compose -p tattoo --env-file .env up -d --force-recreate --wait api worker web
+docker compose -p tattoo --env-file .env up -d --force-recreate --wait api worker
 ```
 
-使用域名和 HTTPS 时，由已有反向代理终止 TLS，代理到 Tattoo 的 Web 端口；将 `APP_ORIGIN` 改为完整 HTTPS 来源，例如 `https://tattoo.example.com`。代理保留请求的 Host 和 Origin；上传大小及等待时间应容纳 Web 已有的 11 MiB 请求限制和 35 秒代理等待。通过 HTTPS 访问后检查登录、刷新和退出。
+使用域名和 HTTPS 时，由已有反向代理终止 TLS，代理到 Tattoo 的 Web 端口；将 `APP_ORIGIN` 改为完整 HTTPS 来源，例如 `https://tattoo.example.com`。代理保留请求的 Host 和 Origin，允许上传 10 MiB 图片并留出请求头和传输开销；生成任务异步执行，不要求代理等待整个模型调用。通过 HTTPS 访问后检查登录、刷新和退出。
 
 Docker 配置根据 `APP_ORIGIN` 自动决定会话 Cookie 的 Secure 属性，HTTPS 来源使用 Secure Cookie。源码运行时可通过 `COOKIE_SECURE` 明确配置，HTTPS 不允许关闭 Secure。当前 Compose 未单独传入该变量，因此修改 Docker 配置时以 `APP_ORIGIN` 为准。应用写请求按来源校验，不能用另一个协议、主机名或端口悄悄替代已配置的来源。
 
@@ -68,7 +68,7 @@ AppID、AppSecret 只在本机页面的公众号账号设置中输入，不写�
 
 ## 停机一致备份
 
-先通知自己其他浏览器窗口保存稿件并停止编辑。备份工具停止所选项目的 Web、API 和 Worker，确认应用容器不再运行后导出 PostgreSQL 与素材；PostgreSQL 保持运行以便执行逻辑导出。先在管理电脑创建 `data/backups` 父目录，不要创建下面的 `before-upgrade` 输出目录。
+先通知自己其他浏览器窗口保存稿件并停止编辑。备份工具停止所选项目的 API 和 Worker，确认应用容器不再运行后导出 PostgreSQL 与素材；PostgreSQL 保持运行以便执行逻辑导出。先在管理电脑创建 `data/backups` 父目录，不要创建下面的 `before-upgrade` 输出目录。
 
 ```bash
 node scripts/backup.mjs --output ./data/backups/before-upgrade --project tattoo --env-file .env
@@ -93,7 +93,7 @@ docker compose -p tattoo --env-file .env up -d --wait --wait-timeout 180
 下例 `release-a` 是示例，请替换为备份时 `TATTOO_VERSION` 实际使用的标签：
 
 ```bash
-docker image save --output ./data/tattoo-images.tar tattoo-app:release-a tattoo-web:release-a postgres:16-alpine
+docker image save --output ./data/tattoo-images.tar tattoo-app:release-a postgres:16-alpine
 ```
 
 在目标 Docker context 中加载：
@@ -122,14 +122,16 @@ node scripts/restore.mjs --input ./data/backups/before-upgrade --project tattoo-
 
 恢复前校验归档大小与哈希、主密钥指纹、应用镜像 ID、数据库版本、目标空库与空素材卷，并要求远程写入关闭。目标应用必须已停止，不覆盖已有业务数据，也不通过 `--force` 绕过检查。哈希只能发现归档与 manifest 不一致，不能证明来源可信；只恢复自己可信保存的备份。PostgreSQL 的恢复会执行归档中的数据库定义。[pg_restore 的归档与信任边界](https://www.postgresql.org/docs/16/app-pgrestore.html)
 
-工具只启动恢复所需 PostgreSQL，不自动启动 API、Web 或 Worker。恢复后撤销原会话，旧 `QUEUED` / `RUNNING` 投递进入 `UNCERTAIN` 并保留核对事件；已有成功、失败和待核对记录保留。原实例可能在备份之后已经创建远程草稿，因此不能把旧队列当作尚未投递直接重放。
+工具只启动恢复所需 PostgreSQL，不自动启动 API 或 Worker。恢复后撤销原会话，旧 `QUEUED` / `RUNNING` 投递进入 `UNCERTAIN` 并保留核对事件；已有成功、失败和待核对记录保留。原实例可能在备份之后已经创建远程草稿，因此不能把旧队列当作尚未投递直接重放。
 
 P6–P8 的模型密钥同样随数据库备份并检查解密，旧排队/运行的生成任务也会冻结，不自动重新请求模型。恢复后先检查最近生成任务和已保存素材；微信写入开关只控制微信，用户明确发起的模型生成仍可能计费。配置和使用见 [模型说明](MODELS.md)。
+
+主题创作任务和已生成的文章候选、封面、最终文章关联同样保留。恢复冻结旧排队/执行中的主题任务，不能自动发起下一阶段的模型调用；需要明确补封面时，在页面单独重试。
 
 先仅启动读取与核对所需的服务：
 
 ```bash
-docker compose -p tattoo-restored --env-file .env.restore up -d --wait --wait-timeout 180 postgres api web
+docker compose -p tattoo-restored --env-file .env.restore up -d --wait --wait-timeout 180 postgres api
 docker compose -p tattoo-restored --env-file .env.restore ps
 ```
 
@@ -140,7 +142,7 @@ docker compose -p tattoo-restored --env-file .env.restore ps
 核对完成后，才在 `.env.restore` 显式启用远程写入，并重新创建应用与 Worker：
 
 ```bash
-docker compose -p tattoo-restored --env-file .env.restore up -d --force-recreate --wait api worker web
+docker compose -p tattoo-restored --env-file .env.restore up -d --force-recreate --wait api worker
 ```
 
 后续维护持续使用恢复实例的项目名和环境文件。恢复中断或失败时，不启动 Worker，也不对已经部分导入的目标反复强制导入；检查保留的错误和数据，使用另一个真正空的项目重新恢复。
@@ -149,11 +151,11 @@ docker compose -p tattoo-restored --env-file .env.restore up -d --force-recreate
 
 1. 记录当前提交、镜像 ID 和配置，保存当前镜像，完成停机一致备份，并确认独立密钥副本可用。
 2. 检出经过验证的新提交，将 `TATTOO_VERSION` 改为新标签；保留原主密钥、数据库密码和持久卷。
-3. 重新构建并启动，等待健康检查，检查登录、文章、图片与任务记录。迁移失败时排查原因，不绕过启动门槛。
+3. 重新构建并启动，等待健康检查，检查登录、文章、图片与任务记录。由旧版四服务升级时，使用下方 `--remove-orphans` 移除同项目的旧 Web 容器，将原 Web 端口交给 API；数据库与素材卷保持。迁移失败时排查原因，不绕过启动门槛。
 
 ```bash
 docker compose -p tattoo --env-file .env build
-docker compose -p tattoo --env-file .env up -d --wait --wait-timeout 180
+docker compose -p tattoo --env-file .env up -d --remove-orphans --wait --wait-timeout 180
 docker compose -p tattoo --env-file .env ps
 ```
 

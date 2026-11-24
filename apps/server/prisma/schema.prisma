@@ -90,6 +90,8 @@ model GenerationJob {
   prompt         String
   sourceText     String          @default("")
   sourceReferences Json          @default("[]")
+  topicId        String?         @db.Uuid
+  topic          TopicCreation?  @relation(fields: [topicId], references: [id], onDelete: Restrict)
   articleId      String?         @db.Uuid
   state          GenerationState @default(QUEUED)
   result         Json?
@@ -104,6 +106,30 @@ model GenerationJob {
   @@index([state, createdAt])
   @@index([modelId, configVersion, kind, createdAt])
   @@index([articleId, createdAt])
+  @@index([topicId])
+}
+
+model TopicCreation {
+  id                 String          @id @default(uuid()) @db.Uuid
+  requestKey         String          @unique @db.Uuid
+  topic              String
+  state              GenerationState @default(QUEUED)
+  stage              String          @default("ARTICLE")
+  textModelId        String          @db.Uuid
+  textConfigVersion  Int
+  imageModelId       String          @db.Uuid
+  imageConfigVersion Int
+  articleJobId       String?         @db.Uuid
+  coverJobId         String?         @db.Uuid
+  coverRequestKey    String          @unique @db.Uuid
+  articleId          String?         @db.Uuid
+  jobs               GenerationJob[]
+  error              String?
+  completedAt        DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@index([state, createdAt])
 }
 
 model SourceFeed {

@@ -347,7 +347,7 @@ async function checkRestored(fixture, expectedSessions = 0) {
             assert.deepEqual(actual.result, expected.result);
           }
         }
-        const generationJobs = await db.generationJob.findMany({ where: { modelId: model.id } });
+        const generationJobs = await db.generationJob.findMany({ where: { modelId: model.id, topicId: null } });
         assert.equal(generationJobs.length, fixture.generationJobs.length);
         for (const expected of fixture.generationJobs) {
           const actual = generationJobs.find((row) => row.id === expected.id);
@@ -364,6 +364,33 @@ async function checkRestored(fixture, expectedSessions = 0) {
           } else {
             assert.equal(actual.state, expected.state);
             assert.deepEqual(actual.result, expected.result);
+          }
+        }
+        const imageModel = await db.aiModel.findUniqueOrThrow({ where: { capability: 'image' } });
+        assert.equal(new SecretBox(process.env.APP_ENCRYPTION_KEY).decrypt(imageModel.apiKeyEncrypted), fixture.aiSecret);
+        const topicTasks = await db.topicCreation.findMany({ orderBy: { id: 'asc' } });
+        assert.equal(topicTasks.length, fixture.topicTasks.length);
+        for (const expected of fixture.topicTasks) {
+          const actual = topicTasks.find((row) => row.id === expected.id);
+          assert.ok(actual);
+          for (const field of ['requestKey', 'topic', 'stage', 'articleJobId', 'coverJobId', 'coverRequestKey', 'articleId'])
+            assert.equal(actual[field], expected[field]);
+          assert.equal(actual.textModelId, model.id);
+          assert.equal(actual.imageModelId, imageModel.id);
+          const articleJob = await db.generationJob.findUniqueOrThrow({ where: { id: actual.articleJobId } });
+          assert.equal(articleJob.topicId, actual.id);
+          assert.equal(articleJob.state, 'SUCCEEDED');
+          assert.deepEqual(articleJob.result, fixture.generationJobs.at(-1).result);
+          const coverJob = await db.generationJob.findUniqueOrThrow({ where: { id: actual.coverJobId } });
+          assert.equal(coverJob.topicId, actual.id);
+          assert.equal(coverJob.state, ['QUEUED', 'RUNNING'].includes(expected.state) ? 'UNCERTAIN' : expected.state);
+          if (expected.state === 'SUCCEEDED')
+            assert.deepEqual(coverJob.result, { type: 'image', asset: fixture.generatedCover });
+          if (['QUEUED', 'RUNNING'].includes(expected.state)) {
+            assert.equal(actual.state, 'UNCERTAIN');
+            assert.match(actual.error, /恢复/);
+          } else {
+            assert.equal(actual.state, expected.state);
           }
         }
         const article = await db.article.findUniqueOrThrow({ where: { id: fixture.articleId }, include: { revisions: { orderBy: { version: 'asc' } } } });
@@ -396,7 +423,7 @@ async function checkRestored(fixture, expectedSessions = 0) {
             assert.equal(actual.events.filter((event) => event.actor === 'restore').length, 0);
           }
         }
-        console.log(JSON.stringify({ article: article.id, revisions: article.revisions.map(({ id, title, version }) => ({ id, title, version })), asset: { id: asset.id, sha256: createHash('sha256').update(bytes).digest('hex') }, mappings, deliveries: deliveries.map(({ id, state, stage, remoteId, executionId, events, attempts }) => ({ id, state, stage, remoteId, executionId, events, attempts })), generationJobs: generationJobs.map(({ id, state, model, sourceText, sourceReferences }) => ({ id, state, model, sourceText, sourceReferences })), material: { id: material.id, text: material.text, hash: material.contentHash, feedId: material.feedId }, feed: { id: feed.id, url: feed.url, title: feed.title }, searchConfig: { version: searchConfig.version, baseUrl: searchConfig.baseUrl }, sourceJobs: sourceJobs.map(({ id, state, result }) => ({ id, state, result })) }));
+        console.log(JSON.stringify({ article: article.id, revisions: article.revisions.map(({ id, title, version }) => ({ id, title, version })), asset: { id: asset.id, sha256: createHash('sha256').update(bytes).digest('hex') }, mappings, deliveries: deliveries.map(({ id, state, stage, remoteId, executionId, events, attempts }) => ({ id, state, stage, remoteId, executionId, events, attempts })), generationJobs: generationJobs.map(({ id, state, model, sourceText, sourceReferences }) => ({ id, state, model, sourceText, sourceReferences })), topicTasks: topicTasks.map(({ id, state, stage, articleJobId, coverJobId, articleId }) => ({ id, state, stage, articleJobId, coverJobId, articleId })), material: { id: material.id, text: material.text, hash: material.contentHash, feedId: material.feedId }, feed: { id: feed.id, url: feed.url, title: feed.title }, searchConfig: { version: searchConfig.version, baseUrl: searchConfig.baseUrl }, sourceJobs: sourceJobs.map(({ id, state, result }) => ({ id, state, result })) }));
       } finally { await db.$disconnect(); }
     `,
   );
@@ -444,7 +471,7 @@ try {
   );
 
   await compose(source, ['up', '-d', '--wait', '--wait-timeout', '180']);
-  assert.deepEqual(await runningServices(source), ['api', 'postgres', 'web', 'worker']);
+  assert.deepEqual(await runningServices(source), ['api', 'postgres', 'worker']);
   const sourceCookie = await login(source);
   const account = (
     await (
@@ -515,6 +542,16 @@ try {
       baseUrl: 'https://api.anthropic.com/v1',
       model: 'recovery-text-fixture',
       anthropicMaxTokens: 8192,
+      apiKey: aiSecret,
+    },
+  });
+  await http(source, '/ai/models/image', {
+    method: 'PUT',
+    cookie: sourceCookie,
+    json: {
+      protocol: 'images-generations',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'recovery-image-fixture',
       apiKey: aiSecret,
     },
   });
@@ -609,6 +646,17 @@ try {
       remoteId: state === 'SUCCEEDED' ? 'p5-remote-' + identifier : null,
     }),
   );
+  const topicTasks = ['QUEUED', 'RUNNING', 'UNCERTAIN', 'FAILED', 'SUCCEEDED'].map((state) => ({
+    id: randomUUID(),
+    requestKey: randomUUID(),
+    topic: '主题恢复验收：文章已生成，不得恢复后自动调用封面模型',
+    state,
+    stage: state === 'SUCCEEDED' ? 'DONE' : 'COVER',
+    articleJobId: randomUUID(),
+    coverJobId: randomUUID(),
+    coverRequestKey: randomUUID(),
+    articleId: state === 'SUCCEEDED' ? articles[0].id : null,
+  }));
   const fixture = {
     accountId: account.id,
     secret: accountSecret,
@@ -621,8 +669,10 @@ try {
     referenceText,
     sourceJobs,
     generationJobs,
+    topicTasks,
     articleId: articles[0].id,
     assetId: asset.id,
+    generatedCover: asset,
     assetDigest,
     revisions: articles.map((article) => ({
       id: article.revisionId,
@@ -661,6 +711,7 @@ try {
           } });
         }
         const model = await db.aiModel.findUniqueOrThrow({ where: { capability: 'text' } });
+        const imageModel = await db.aiModel.findUniqueOrThrow({ where: { capability: 'image' } });
         for (const row of fixture.generationJobs) {
           await db.generationJob.create({ data: {
             id: row.id, requestKey: randomUUID(), kind: 'ARTICLE', capability: 'text',
@@ -672,6 +723,32 @@ try {
             heartbeatAt: row.state === 'RUNNING' ? new Date() : null,
             completedAt: ['UNCERTAIN', 'FAILED', 'SUCCEEDED'].includes(row.state) ? new Date() : null,
             ...(row.result ? { result: row.result } : {}),
+          } });
+        }
+        for (const row of fixture.topicTasks) {
+          await db.topicCreation.create({ data: {
+            ...row,
+            textModelId: model.id, textConfigVersion: model.version,
+            imageModelId: imageModel.id, imageConfigVersion: imageModel.version,
+            completedAt: ['UNCERTAIN', 'FAILED', 'SUCCEEDED'].includes(row.state) ? new Date() : null,
+          } });
+          await db.generationJob.create({ data: {
+            id: row.articleJobId, requestKey: randomUUID(), topicId: row.id,
+            kind: 'ARTICLE', capability: 'text', modelId: model.id, model: model.model,
+            protocol: model.protocol, configVersion: model.version,
+            inputHash: 'topic-recovery-article', prompt: row.topic,
+            state: 'SUCCEEDED', result: fixture.generationJobs.at(-1).result, completedAt: new Date(),
+          } });
+          await db.generationJob.create({ data: {
+            id: row.coverJobId, requestKey: row.coverRequestKey, topicId: row.id,
+            kind: 'COVER', capability: 'image', modelId: imageModel.id, model: imageModel.model,
+            protocol: imageModel.protocol, configVersion: imageModel.version,
+            inputHash: 'topic-recovery-cover', prompt: row.topic,
+            state: row.state,
+            executionId: row.state === 'RUNNING' ? randomUUID() : null,
+            heartbeatAt: row.state === 'RUNNING' ? new Date() : null,
+            completedAt: ['UNCERTAIN', 'FAILED', 'SUCCEEDED'].includes(row.state) ? new Date() : null,
+            ...(row.state === 'SUCCEEDED' ? { result: { type: 'image', asset: fixture.generatedCover } } : {}),
           } });
         }
         for (const row of fixture.deliveries) {
@@ -697,7 +774,7 @@ try {
     `,
   );
   console.info(
-    'PASS: 真实 HTTP 创建账号、图片、6 份修订、模型与搜索配置和订阅；停止 Worker 后准备资料、快照及五种投递/生成/搜索状态，无真实服务调用',
+    'PASS: 真实 HTTP 创建账号、图片、6 份修订、模型与搜索配置和订阅；停止 Worker 后准备资料、快照及五种投递/生成/搜索/主题状态，无真实服务调用',
   );
 
   const backupDirectory = join(directory, 'backup');
@@ -760,11 +837,11 @@ try {
   assert.notEqual((await restoreCommand(backupDirectory, target.envFile, true)).code, 0);
   assert.deepEqual(await checkRestored(fixture), restored);
   console.info(
-    'PASS: 空实例恢复后公众号、模型及搜索密钥可解密，会话撤销，图文/资料/订阅/快照完整，旧投递、生成和搜索任务冻结；拒绝覆盖非空目标',
+    'PASS: 空实例恢复后公众号、模型及搜索密钥可解密，会话撤销，图文/资料/订阅/快照完整，旧投递、生成、搜索和主题任务冻结；拒绝覆盖非空目标',
   );
 
-  await compose(target, ['up', '-d', '--wait', '--wait-timeout', '180', 'api', 'web']);
-  assert.deepEqual(await runningServices(target), ['api', 'postgres', 'web']);
+  await compose(target, ['up', '-d', '--wait', '--wait-timeout', '180', 'api']);
+  assert.deepEqual(await runningServices(target), ['api', 'postgres']);
   await (await http(target, '/auth/me', { cookie: sourceCookie, status: 401 })).arrayBuffer();
   const targetCookie = await login(target);
   const me = await (await http(target, '/auth/me', { cookie: targetCookie })).json();
@@ -851,9 +928,8 @@ try {
     '--wait-timeout',
     '180',
     'api',
-    'web',
   ]);
-  assert.deepEqual(await runningServices(target), ['api', 'postgres', 'web']);
+  assert.deepEqual(await runningServices(target), ['api', 'postgres']);
   assert.equal(
     (await (await http(target, '/auth/me', { cookie: targetCookie })).json()).data
       .remoteWritesEnabled,

@@ -19,16 +19,11 @@ ENV NODE_ENV=production
 COPY --from=production-dependencies /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/apps/server ./apps/server
+COPY --from=build /app/apps/web/dist ./apps/web/dist
 COPY --from=build /app/packages/contracts ./packages/contracts
 COPY --from=build /app/scripts/start-api.mjs ./scripts/start-api.mjs
 COPY --from=build /app/scripts/reset-admin.mjs ./scripts/reset-admin.mjs
 RUN mkdir -p /data/assets && chown node:node /data/assets
 USER node
+EXPOSE 3000
 CMD ["node", "scripts/start-api.mjs"]
-
-FROM nginx:1.28-alpine AS web
-COPY deploy/nginx.conf /etc/nginx/nginx.conf
-COPY --from=build /app/apps/web/dist /usr/share/nginx/html
-USER nginx
-EXPOSE 8080
-CMD ["nginx", "-g", "daemon off;"]

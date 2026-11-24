@@ -79,6 +79,73 @@ code {
 .brand-dot {
   color: #648976;
 }
+
+.heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.topic-current-task,
+.topic-task-history {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.topic-current-task h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.topic-current-task .ant-steps {
+  margin: 18px 0;
+}
+
+.topic-task-list {
+  display: grid;
+  gap: 8px;
+}
+
+.topic-task-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.topic-task-row.selected {
+  border-color: var(--green);
+  background: #f4f8f5;
+}
+
+.topic-task-row > span:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.topic-task-row .ant-tag {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.topic-article-preview {
+  margin-top: 16px;
+}
+
+.topic-article-preview summary {
+  cursor: pointer;
+}
 .eyebrow {
   font-size: 0.75rem;
   color: var(--green);

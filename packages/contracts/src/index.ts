@@ -310,3 +310,4 @@ export const initialDocument: DocumentNode = { type: 'doc', content: [{ type: 'p
 
 export * from './ai';
 export * from './sources';
+export * from './topics';

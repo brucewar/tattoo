@@ -11,6 +11,7 @@ import { RuntimeModule } from './runtime.module';
 import { PublishingModule, PublishingService, WORKER_LOCK } from './publishing/publishing.module';
 import { AiModule } from './ai/ai.module';
 import { AiService } from './ai/service';
+import { TopicCreationService } from './ai/topics';
 import { SourcesModule } from './sources/sources.module';
 import { SourcesService } from './sources/service';
 
@@ -54,6 +55,7 @@ async function main() {
     });
     const publishing = application.get(PublishingService);
     const ai = application.get(AiService);
+    const topics = application.get(TopicCreationService);
     const sources = application.get(SourcesService);
     const assertActive = async () => {
       if (stopping || connectionError || !ownsLock) throw new Error('Worker 执行权已停止');
@@ -62,6 +64,7 @@ async function main() {
     };
     await publishing.recover();
     await ai.recover();
+    await topics.recover();
     await sources.recover();
     await writeFile(heartbeat, String(Date.now()), { mode: 0o600 });
     let refreshing = false;
@@ -85,10 +88,15 @@ async function main() {
       await assertActive();
       const processed = await publishing.processNext(assertActive);
       await assertActive();
+      const topicAdvanced = await topics.processNext(assertActive);
+      await assertActive();
       const generated = await ai.processNext(assertActive);
       await assertActive();
+      const topicCompleted = await topics.processNext(assertActive);
+      await assertActive();
       const collected = await sources.processNext(assertActive);
-      if (!processed && !generated && !collected) await setTimeout(1000);
+      if (!processed && !topicAdvanced && !generated && !topicCompleted && !collected)
+        await setTimeout(1000);
     }
     if (connectionError) throw new Error('执行权连接中断');
   } finally {

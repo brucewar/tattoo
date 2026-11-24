@@ -162,28 +162,32 @@ export class ContentService {
   }
 
   async create(input: unknown) {
+    return this.database.$transaction((transaction) =>
+      this.createInTransaction(transaction, input),
+    );
+  }
+
+  async createInTransaction(transaction: Prisma.TransactionClient, input: unknown) {
     const { data, hash, assetIds } = content(input, false);
-    return this.database.$transaction(async (transaction) => {
-      await checkAssets(transaction, assetIds);
-      const article = await transaction.article.create({ data: {} });
-      const revision = await transaction.revision.create({
-        data: {
-          ...data,
-          document: data.document as Prisma.InputJsonValue,
-          articleId: article.id,
-          version: 1,
-          contentHash: hash,
-          assets: { create: assetIds.map((assetId) => ({ assetId })) },
-        },
-      });
-      return publicArticle(
-        await transaction.article.update({
-          where: { id: article.id },
-          data: { currentRevisionId: revision.id },
-          include: { currentRevision: true },
-        }),
-      );
+    await checkAssets(transaction, assetIds);
+    const article = await transaction.article.create({ data: {} });
+    const revision = await transaction.revision.create({
+      data: {
+        ...data,
+        document: data.document as Prisma.InputJsonValue,
+        articleId: article.id,
+        version: 1,
+        contentHash: hash,
+        assets: { create: assetIds.map((assetId) => ({ assetId })) },
+      },
     });
+    return publicArticle(
+      await transaction.article.update({
+        where: { id: article.id },
+        data: { currentRevisionId: revision.id },
+        include: { currentRevision: true },
+      }),
+    );
   }
 
   async update(id: string, input: unknown) {

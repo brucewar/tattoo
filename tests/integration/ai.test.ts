@@ -13,11 +13,14 @@ import type {
   AiModels,
   AiTextProtocol,
   Article,
+  TopicCreationTask,
 } from '@tattoo/contracts';
 import { Client } from 'pg';
 import sharp from 'sharp';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AiService } from '../../apps/server/src/ai/service';
+import { TopicCreationService } from '../../apps/server/src/ai/topics';
+import { ContentService } from '../../apps/server/src/content/service';
 import { AssetsService } from '../../apps/server/src/assets/service';
 import { loadConfig, type Config } from '../../apps/server/src/config';
 import type { Database } from '../../apps/server/src/database';
@@ -38,6 +41,8 @@ const imageKey = 'ai-image-test-key-never-real';
 const encryptionKey = Buffer.alloc(32, 21).toString('base64');
 let database: PrismaClient;
 let ai: AiService;
+let topics: TopicCreationService;
+let content: ContentService;
 let config: Config;
 let mock: Server | undefined;
 let model: ReturnType<typeof createAiMock>;
@@ -166,6 +171,8 @@ beforeAll(async () => {
   };
   config = loadConfig(env);
   ai = new AiService(database as Database, config, new AssetsService(database as Database, config));
+  content = new ContentService(database as Database);
+  topics = new TopicCreationService(database as Database, content);
   api = spawn(process.execPath, [resolve('apps/server/dist/main.js')], {
     cwd: resolve('.'),
     env,
@@ -200,6 +207,10 @@ afterEach(async () => {
   await database?.generationJob.updateMany({
     where: { state: { in: ['QUEUED', 'RUNNING'] } },
     data: { state: 'FAILED', executionId: null },
+  });
+  await database?.topicCreation.updateMany({
+    where: { state: { in: ['QUEUED', 'RUNNING'] } },
+    data: { state: 'FAILED' },
   });
 }, 35000);
 
@@ -266,6 +277,19 @@ describe('AI 配置与生成 / 真实 API、PostgreSQL 和隔离模型接口', (
       prompt: '测试文章',
     });
     expect(missing.status).toBe(400);
+    expect(await database.generationJob.count()).toBe(0);
+    expect(model.calls).toEqual({ text: 0, image: 0 });
+    expect((await request('/ai/topics', 'GET', undefined, '')).status).toBe(401);
+    await configure('text');
+    expect(
+      (
+        await request('/ai/topics', 'POST', {
+          requestKey: randomUUID(),
+          topic: '仅一个主题也需要两类模型',
+        })
+      ).status,
+    ).toBe(400);
+    expect(await database.topicCreation.count()).toBe(0);
     expect(await database.generationJob.count()).toBe(0);
     expect(model.calls).toEqual({ text: 0, image: 0 });
   });
@@ -342,6 +366,18 @@ describe('AI 配置与生成 / 真实 API、PostgreSQL 和隔离模型接口', (
       await connection.query(
         await readFile(join(migrations, '20261124010000_sources', 'migration.sql'), 'utf8'),
       );
+      await connection.query(
+        await readFile(join(migrations, '20261124120000_topic_creation', 'migration.sql'), 'utf8'),
+      );
+      expect((await connection.query('SELECT "topicId" FROM "GenerationJob"')).rows).toEqual([
+        { topicId: null },
+        { topicId: null },
+      ]);
+      expect(
+        Number(
+          (await connection.query('SELECT COUNT(*) AS count FROM "TopicCreation"')).rows[0].count,
+        ),
+      ).toBe(0);
       const references = await connection.query('SELECT "sourceReferences" FROM "GenerationJob"');
       expect(references.rows).toEqual([{ sourceReferences: [] }, { sourceReferences: [] }]);
       for (const table of ['Source', 'SourceFeed', 'SourceSearchConfig', 'SourceJob']) {
@@ -872,5 +908,260 @@ describe('AI 配置与生成 / 真实 API、PostgreSQL 和隔离模型接口', (
     ).toBe(400);
     expect(model.calls.text).toBe(beforeCalls);
     expect(await database.generationJob.count()).toBe(beforeJobs);
+  });
+});
+
+async function createTopic(topic = '城市里的一平方米小花园') {
+  await configure('text');
+  await configure('image');
+  return data<TopicCreationTask>(
+    await request('/ai/topics', 'POST', { requestKey: randomUUID(), topic }),
+  );
+}
+
+async function getTopic(id: string) {
+  return data<TopicCreationTask>(await request('/ai/topics/' + id));
+}
+
+async function finishTopic(id: string) {
+  for (let index = 0; index < 8; index++) {
+    await topics.processNext(async () => undefined);
+    await processNext();
+    await topics.processNext(async () => undefined);
+    const task = await getTopic(id);
+    if (!['QUEUED', 'RUNNING'].includes(task.state)) return task;
+  }
+  throw new Error('主题创作没有结束');
+}
+
+describe('主题自动创作 / 真实 API、PostgreSQL 和隔离模型接口', () => {
+  it('文章失败时停止后续封面，空主题和不支持的单独封面重试被拒绝', async () => {
+    const task = await createTopic();
+    const before = { ...model.calls };
+    model.setNext({ nextText: 'refused' });
+    const failed = await finishTopic(task.id);
+    expect(failed.state).toBe('FAILED');
+    expect(failed.stage).toBe('ARTICLE');
+    expect(failed.articleResult).toBeNull();
+    expect(failed.coverJobId).toBeNull();
+    expect(failed.canRetryCover).toBe(false);
+    expect(model.calls).toEqual({ text: before.text + 1, image: before.image });
+    expect(
+      (await request(`/ai/topics/${task.id}/retry-cover`, 'POST', { requestKey: randomUUID() }))
+        .status,
+    ).toBe(409);
+    expect(
+      (await request('/ai/topics', 'POST', { requestKey: randomUUID(), topic: '   ' })).status,
+    ).toBe(400);
+  });
+  it('一个主题依次生成文章和关联封面，原子保存新稿并进入修订与微信预览', async () => {
+    const before = { ...model.calls };
+    const beforeArticles = await database.article.count();
+    const beforeDeliveries = await database.delivery.count();
+    const task = await createTopic();
+    expect(task.state).toBe('QUEUED');
+    expect(task.articleId).toBeNull();
+    const same = await data<TopicCreationTask>(
+      await request('/ai/topics', 'POST', { requestKey: task.requestKey, topic: task.topic }),
+    );
+    expect(same.id).toBe(task.id);
+    expect(
+      (await request('/ai/topics', 'POST', { requestKey: task.requestKey, topic: '不同的主题' }))
+        .status,
+    ).toBe(409);
+    const ready = await finishTopic(task.id);
+    expect(ready.state).toBe('SUCCEEDED');
+    expect(ready.stage).toBe('DONE');
+    expect(ready.articleId).toBeTruthy();
+    expect(model.calls).toEqual({ text: before.text + 1, image: before.image + 1 });
+    const coverPrompt = model.requests.filter((item) => item.capability === 'image').at(-1)!.prompt;
+    expect(coverPrompt).toContain(task.topic);
+    expect(coverPrompt).toContain('AI 生成测试文章');
+    expect(coverPrompt).toContain('从灵感到文章');
+    const article = await data<Article>(await request('/articles/' + ready.articleId));
+    expect(article.title).toBe('AI 生成测试文章');
+    expect(article.coverId).toBeTruthy();
+    expect(article.version).toBe(1);
+    expect(await database.article.count()).toBe(beforeArticles + 1);
+    expect(await database.revision.count({ where: { articleId: article.id } })).toBe(1);
+    const preview = await data<{ html: string; warnings: string[] }>(
+      await request(`/articles/${article.id}/preview`, 'POST', { revisionId: article.revisionId }),
+    );
+    expect(preview.html).toContain('从灵感到文章');
+    expect(preview.warnings).not.toContain('尚未设置封面；投递前需要补齐');
+    expect(await database.delivery.count()).toBe(beforeDeliveries);
+    await topics.processNext(async () => undefined);
+    expect(await database.article.count()).toBe(beforeArticles + 1);
+    const listing = await data<{ items: TopicCreationTask[] }>(await request('/ai/topics'));
+    expect(listing.items.some((item) => item.id === task.id && item.articleId === article.id)).toBe(
+      true,
+    );
+  });
+
+  it('封面失败保留文章，明确重试只重新生成封面且请求去重', async () => {
+    const task = await createTopic('关于专注的文章');
+    const before = { ...model.calls };
+    model.setNext({ nextImage: 'refused' });
+    const failed = await finishTopic(task.id);
+    expect(failed.state).toBe('FAILED');
+    expect(failed.stage).toBe('COVER');
+    expect(failed.articleResult?.title).toBe('AI 生成测试文章');
+    expect(failed.articleId).toBeNull();
+    expect(failed.canRetryCover).toBe(true);
+    const retry = { requestKey: randomUUID() };
+    const responses = await Promise.all([
+      request(`/ai/topics/${task.id}/retry-cover`, 'POST', retry),
+      request(`/ai/topics/${task.id}/retry-cover`, 'POST', retry),
+    ]);
+    const retried = await Promise.all(
+      responses.map((response) => data<TopicCreationTask>(response)),
+    );
+    expect(retried[0]!.coverJobId).toBe(retried[1]!.coverJobId);
+    expect(retried[0]!.articleJobId).toBe(task.articleJobId);
+    const ready = await finishTopic(task.id);
+    expect(ready.state).toBe('SUCCEEDED');
+    expect(model.calls).toEqual({ text: before.text + 1, image: before.image + 2 });
+    expect(
+      await database.generationJob.count({ where: { topicId: task.id, kind: 'ARTICLE' } }),
+    ).toBe(1);
+  });
+
+  it('阶段间图片配置变更会暂停，明确重试后才用新配置生成封面', async () => {
+    const task = await createTopic();
+    const before = { ...model.calls };
+    await topics.processNext(async () => undefined);
+    await processNext();
+    await configure('image', { model: 'explicitly-changed-image-model' });
+    await topics.processNext(async () => undefined);
+    const paused = await getTopic(task.id);
+    expect(paused.state).toBe('FAILED');
+    expect(paused.canRetryCover).toBe(true);
+    expect(model.calls.image).toBe(before.image);
+    expect(paused.error).toContain('配置已更改');
+    await data(
+      await request(`/ai/topics/${task.id}/retry-cover`, 'POST', { requestKey: randomUUID() }),
+    );
+    expect((await finishTopic(task.id)).state).toBe('SUCCEEDED');
+    expect(model.calls).toEqual({ text: before.text + 1, image: before.image + 1 });
+  });
+
+  it('重启恢复冻结父任务及待执行封面，不盲目发起收费请求', async () => {
+    const task = await createTopic();
+    await topics.processNext(async () => undefined);
+    await processNext();
+    await topics.processNext(async () => undefined);
+    const before = { ...model.calls };
+    await topics.recover();
+    const paused = await getTopic(task.id);
+    expect(paused.state).toBe('UNCERTAIN');
+    expect(paused.articleResult).toBeTruthy();
+    expect(paused.canRetryCover).toBe(true);
+    expect((await getJob(paused.coverJobId!)).state).toBe('UNCERTAIN');
+    expect(await processNext()).toBe(false);
+    expect(await topics.processNext(async () => undefined)).toBe(false);
+    expect(model.calls).toEqual(before);
+    await data(
+      await request(`/ai/topics/${task.id}/retry-cover`, 'POST', { requestKey: randomUUID() }),
+    );
+    expect((await finishTopic(task.id)).state).toBe('SUCCEEDED');
+    expect(model.calls).toEqual({ text: before.text, image: before.image + 1 });
+  });
+
+  it('两项成功后保存中断，可明确恢复保存并幂等取回稿件，不再调用模型', async () => {
+    const task = await createTopic();
+    await topics.processNext(async () => undefined);
+    await processNext();
+    await topics.processNext(async () => undefined);
+    await processNext();
+    const before = { ...model.calls };
+    const beforeArticles = await database.article.count();
+    await topics.recover();
+    const paused = await getTopic(task.id);
+    expect(paused.canResumeSave).toBe(true);
+    expect(paused.canRetryCover).toBe(false);
+    expect(
+      (await request(`/ai/topics/${task.id}/retry-cover`, 'POST', { requestKey: randomUUID() }))
+        .status,
+    ).toBe(409);
+    const input = { requestKey: randomUUID() };
+    const first = await data<TopicCreationTask>(
+      await request(`/ai/topics/${task.id}/resume-save`, 'POST', input),
+    );
+    const second = await data<TopicCreationTask>(
+      await request(`/ai/topics/${task.id}/resume-save`, 'POST', input),
+    );
+    expect(first.state).toBe('SUCCEEDED');
+    expect(second.articleId).toBe(first.articleId);
+    expect(await database.article.count()).toBe(beforeArticles + 1);
+    expect(model.calls).toEqual(before);
+  });
+
+  it('保存校验失败不会打断Worker，保留图文供修复后无收费恢复', async () => {
+    const task = await createTopic();
+    await topics.processNext(async () => undefined);
+    await processNext();
+    await topics.processNext(async () => undefined);
+    await processNext();
+    const before = { ...model.calls };
+    const row = await database.generationJob.findUniqueOrThrow({
+      where: { id: task.articleJobId! },
+    });
+    const original = row.result!;
+    await database.generationJob.update({
+      where: { id: row.id },
+      data: {
+        result: {
+          ...(original as object),
+          document: { type: 'doc', content: [{ type: 'invalid-node' }] },
+        },
+      },
+    });
+    expect(await topics.processNext(async () => undefined)).toBe(true);
+    const failed = await getTopic(task.id);
+    expect(failed.state).toBe('FAILED');
+    expect(failed.stage).toBe('SAVE');
+    expect(failed.canResumeSave).toBe(true);
+    await database.generationJob.update({ where: { id: row.id }, data: { result: original } });
+    const saved = await data<TopicCreationTask>(
+      await request(`/ai/topics/${task.id}/resume-save`, 'POST', { requestKey: randomUUID() }),
+    );
+    expect(saved.state).toBe('SUCCEEDED');
+    expect(model.calls).toEqual(before);
+  });
+
+  it('最终保存期间失去Worker执行权回滚新稿和完成状态，恢复保存也不重复收费', async () => {
+    const task = await createTopic();
+    await topics.processNext(async () => undefined);
+    await processNext();
+    await topics.processNext(async () => undefined);
+    await processNext();
+    const before = { ...model.calls };
+    const beforeArticles = await database.article.count();
+    let active = true;
+    const originalSave = content.createInTransaction.bind(content);
+    const save = vi.spyOn(content, 'createInTransaction').mockImplementation(async (tx, input) => {
+      const saved = await originalSave(tx, input);
+      active = false;
+      return saved;
+    });
+    try {
+      await expect(
+        topics.processNext(async () => {
+          if (!active) throw new Error('worker lock lost');
+        }),
+      ).rejects.toThrow('worker lock lost');
+    } finally {
+      save.mockRestore();
+    }
+    expect(await database.article.count()).toBe(beforeArticles);
+    expect((await getTopic(task.id)).state).toBe('RUNNING');
+    await topics.recover();
+    expect((await getTopic(task.id)).canResumeSave).toBe(true);
+    const ready = await data<TopicCreationTask>(
+      await request(`/ai/topics/${task.id}/resume-save`, 'POST', { requestKey: randomUUID() }),
+    );
+    expect(ready.state).toBe('SUCCEEDED');
+    expect(await database.article.count()).toBe(beforeArticles + 1);
+    expect(model.calls).toEqual(before);
   });
 });

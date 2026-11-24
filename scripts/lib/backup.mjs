@@ -204,7 +204,9 @@ async function applicationsStopped(control, expectedImageId) {
         !['exited', 'created', 'dead'].includes(row.State),
     )
   )
-    throw new BackupError('请先停止目标项目的 web、api 和 worker，再恢复或重试');
+    throw new BackupError(
+      '请先停止目标项目的 api 和 worker（升级前的 web 也须停止），再恢复或重试',
+    );
   if (expectedImageId) {
     for (const row of rows.filter((row) => ['api', 'worker'].includes(row.Service))) {
       if (!/^[a-f0-9]{12,64}$/.test(row.ID ?? '')) throw new BackupError('无法核验已部署应用容器');
@@ -415,7 +417,7 @@ export async function backup(options) {
     throw error;
   }
   console.info('正在停止应用写入；备份完成后应用保持停止，需要显式重新启动。');
-  await control.compose(['stop', '--timeout', '45', 'web', 'api', 'worker']);
+  await control.compose(['stop', '--timeout', '45', 'api', 'worker']);
   await applicationsStopped(control, config.imageId);
   const version = await postgresVersion(control);
   await control.node(accountCheck);
@@ -507,6 +509,10 @@ export const restoredTasksSql = `
   UPDATE "SourceJob" SET state='UNCERTAIN',
     error='备份恢复后已暂停旧资料任务；搜索服务可能已计费，请核对后显式重新获取',
     "executionId"=NULL, "heartbeatAt"=NULL, "completedAt"=CURRENT_TIMESTAMP, "updatedAt"=CURRENT_TIMESTAMP
+      WHERE state IN ('QUEUED', 'RUNNING');
+  UPDATE "TopicCreation" SET state='UNCERTAIN',
+    error='备份恢复后已暂停旧主题任务；原实例可能已调用模型，请核对结果后显式重试',
+    "completedAt"=CURRENT_TIMESTAMP, "updatedAt"=CURRENT_TIMESTAMP
       WHERE state IN ('QUEUED', 'RUNNING');
   COMMIT;
 `;

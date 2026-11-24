@@ -41,7 +41,7 @@ docker compose build
 docker compose up -d --wait
 ```
 
-配置文件已存在时跳过 `setup`。默认访问 `http://localhost:8080`；局域网访问需将 `.env` 的 `APP_ORIGIN` 改为实际访问来源，包括端口。API 与 Worker 共享应用镜像，只有 web 对宿主开放端口。API 在启动前执行 `prisma migrate deploy`，失败则不启动 HTTP 服务；Worker 等待 API 就绪后启动。数据库与图片使用命名卷。
+配置文件已存在时跳过 `setup`。默认访问 `http://localhost:8080`；局域网访问需将 `.env` 的 `APP_ORIGIN` 改为实际访问来源，包括端口。前端构建包含在单一应用镜像内，由 API 提供；API 与 Worker 共享镜像，只有 API 对宿主开放 Web 端口。Compose 共 API、Worker、PostgreSQL 三个容器。API 在启动前执行 `prisma migrate deploy`，失败则不启动 HTTP 服务；Worker 等待 API 就绪后启动。数据库与图片使用命名卷。
 
 当前已实现登录、账号设置、只读接口验证、固定测试草稿，以及文章编辑、修订、预览和普通文章草稿投递。模拟服务通过仍不能解释为真实微信权限通过。应用会固定读取仓库根目录的 `.env`，相对素材路径也以仓库根目录解析，因此从 workspace 启动 API/Worker 时与 Docker 的配置规则一致。
 
@@ -57,7 +57,7 @@ docker compose up -d --wait
 
 ## 显式创建测试草稿
 
-1. 将 `.env` 中 `REMOTE_WRITES_ENABLED` 改为 `true`，执行 `docker compose up -d --force-recreate api worker web` 使配置生效。
+1. 将 `.env` 中 `REMOTE_WRITES_ENABLED` 改为 `true`，执行 `docker compose up -d --force-recreate api worker` 使配置生效。
 2. 在账号设置中选择公众号，上传 JPG/PNG 封面，确认将产生远程素材及草稿后发起测试。
 3. 系统创建持久任务，Worker 在后台上传封面并创建固定测试文章；重复点击或网络重试沿用同一请求标识。
 4. 在投递详情查看结果与远程 ID，并在微信后台确认草稿实际可见。测试素材与草稿由用户按需手动清理，系统不自动删除。
@@ -111,4 +111,4 @@ Remove-Item Env:TATTOO_NEW_PASSWORD
 
 普通重建使用 `docker compose up -d --build`，不要添加 `down -v`。备份应包含一致的 PostgreSQL 导出和素材卷，主密钥独立保存；已提供 `node scripts/backup.mjs` 与 `node scripts/restore.mjs`；管理电脑通过当前 Docker context 操作目标容器，数据库与素材采用同一次停机备份。具体参数、主密钥和匹配镜像保管、空实例恢复及旧任务核对见 [运维说明](OPERATIONS.md)。恢复实例先保持 `REMOTE_WRITES_ENABLED=false`，核对旧任务后再显式启用。此开关不代表微信账号已具备写权限。
 
-恢复工具的独立容器验收入口为 `npm run verify:recovery`，需要已构建的应用/Web 镜像和可在管理电脑环回地址访问的 Docker 发布端口。它只创建随机隔离项目并在结束后删除自身容器和卷，不操作日常部署；结果见 [P5 验证记录](P5-VERIFICATION.md)。
+恢复工具的独立容器验收入口为 `npm run verify:recovery`，需要已构建的应用镜像和可在管理电脑环回地址访问的 Docker 发布端口。它只创建随机隔离项目并在结束后删除自身容器和卷，不操作日常部署；历史四服务结果见 [P5 验证记录](P5-VERIFICATION.md)，单镜像结构以本轮新记录为准。
