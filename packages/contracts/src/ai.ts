@@ -3,6 +3,10 @@ import type { Asset, DocumentNode } from './index';
 
 export const aiCapabilities = ['text', 'image'] as const;
 export type AiCapability = (typeof aiCapabilities)[number];
+export const aiTextProtocols = ['chat-completions', 'responses', 'anthropic-messages'] as const;
+export type AiTextProtocol = (typeof aiTextProtocols)[number];
+export const aiProtocols = [...aiTextProtocols, 'images-generations'] as const;
+export type AiProtocol = (typeof aiProtocols)[number];
 export const aiGenerationKinds = [
   'ARTICLE',
   'REWRITE',
@@ -23,6 +27,7 @@ const safeText = (max: number) =>
 
 export const aiModelInput = z
   .object({
+    protocol: z.enum(aiProtocols).optional(),
     baseUrl: z.string().trim().min(1).max(2000),
     model: z
       .string()
@@ -39,6 +44,7 @@ export const aiModelInput = z
     clearApiKey: z.boolean().default(false),
     imageSize: z.string().trim().max(30).default(''),
     imageResponseFormat: z.enum(['auto', 'b64_json', 'url']).default('auto'),
+    anthropicMaxTokens: z.number().int().min(1).max(128000).default(4096),
   })
   .strict();
 export type AiModelInput = z.infer<typeof aiModelInput>;
@@ -76,13 +82,14 @@ export type AiValidation = {
 };
 export type AiModelConfig = {
   capability: AiCapability;
-  protocol: 'openai-compatible';
+  protocol: AiProtocol;
   baseUrl: string;
   model: string;
   hasApiKey: boolean;
   version: number;
   imageSize: string;
   imageResponseFormat: AiImageResponseFormat;
+  anthropicMaxTokens: number;
   updatedAt: string;
   lastValidation: AiValidation | null;
 };
@@ -96,6 +103,7 @@ export type AiGenerationJob = {
   requestKey: string;
   kind: AiGenerationKind;
   capability: AiCapability;
+  protocol: AiProtocol;
   model: string;
   configVersion: number;
   state: AiGenerationState;

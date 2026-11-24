@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import type { AiGenerationJob, Article } from '@tattoo/contracts';
+import type { AiGenerationJob, AiModelConfig, Article } from '@tattoo/contracts';
 
 test.skip(
   process.env.TATTOO_E2E_TEST_MODE !== '1' ||
@@ -13,7 +13,14 @@ test.skip(
 
 type Audit = {
   calls: { text: number; image: number };
-  requests: { capability: string; task: string; model: string; prompt: string }[];
+  requests: {
+    capability: string;
+    protocol: string;
+    task: string;
+    model: string;
+    prompt: string;
+    maxTokens: number | null;
+  }[];
 };
 
 async function audit(): Promise<Audit> {
@@ -48,6 +55,14 @@ async function configure(page: Page, verify = false) {
   for (const capability of ['text', 'image'] as const) {
     const label = capability === 'text' ? '文本模型' : '图片模型';
     const region = page.getByRole('region', { name: label, exact: true });
+    if (capability === 'text') {
+      await region.getByLabel('接口协议', { exact: true }).focus();
+      await region.getByLabel('接口协议', { exact: true }).press('ArrowDown');
+      await page
+        .locator('.ant-select-dropdown:visible')
+        .getByText('Chat Completions', { exact: true })
+        .click();
+    }
     await region.getByLabel('服务地址', { exact: true }).fill(process.env.TATTOO_E2E_AI_BASE_URL!);
     await region.getByLabel('模型名称', { exact: true }).fill(`browser-${capability}-model`);
     const secret = `ai-${capability}-test-key-e2e`;
@@ -120,6 +135,79 @@ async function readJob(page: Page, id: string) {
 
 test.afterEach(async () => {
   await control({ release: true });
+});
+
+test('Responses 与 Anthropic 协议可选择、刷新保留并实际生成文章，图片配置保持独立', async ({
+  page,
+}) => {
+  test.setTimeout(90000);
+  await login(page);
+  await configure(page);
+  const image = page.getByRole('region', { name: '图片模型', exact: true });
+  await expect(image.getByLabel('接口协议', { exact: true })).toHaveCount(0);
+  const before = (await audit()).calls;
+  for (const [protocol, label] of [
+    ['responses', 'Responses'],
+    ['anthropic-messages', 'Anthropic Messages'],
+  ] as const) {
+    await page.getByRole('button', { name: '模型配置', exact: true }).click();
+    const text = page.getByRole('region', { name: '文本模型', exact: true });
+    await text.getByLabel('接口协议', { exact: true }).focus();
+    await text.getByLabel('接口协议', { exact: true }).press('ArrowDown');
+    await page.locator('.ant-select-dropdown:visible').getByText(label, { exact: true }).click();
+    if (protocol === 'anthropic-messages') {
+      await expect(text.getByLabel('最大输出 tokens', { exact: true })).toHaveValue('4096');
+      await text.getByLabel('最大输出 tokens', { exact: true }).fill('6144');
+    } else {
+      await expect(text.getByLabel('最大输出 tokens', { exact: true })).toHaveCount(0);
+    }
+    const [saved] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().endsWith('/api/v1/ai/models/text') &&
+          response.request().method() === 'PUT',
+      ),
+      text.getByRole('button', { name: '保存文本模型配置', exact: true }).click(),
+    ]);
+    expect(saved.ok(), await saved.text()).toBe(true);
+    const configured = (await saved.json()).data as AiModelConfig;
+    expect(configured.protocol).toBe(protocol);
+    expect(configured.hasApiKey).toBe(true);
+    expect(configured.lastValidation).toBeNull();
+    await page.reload();
+    await page.getByRole('button', { name: '模型配置', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '模型配置', exact: true })).toBeVisible();
+    await expect(text.getByText(label, { exact: true })).toBeVisible();
+    await expect(text.getByLabel('API Key', { exact: true })).toHaveValue('');
+    if (protocol === 'anthropic-messages')
+      await expect(text.getByLabel('最大输出 tokens', { exact: true })).toHaveValue('6144');
+    const models = (await (await page.request.get('/api/v1/ai/models')).json()).data;
+    expect(models.text.protocol).toBe(protocol);
+    expect(models.image.protocol).toBe('images-generations');
+    await text.getByRole('button', { name: '验证文本模型', exact: true }).click();
+    await expect(text.getByText('生成验证通过', { exact: true })).toBeVisible({ timeout: 30000 });
+    await newArticle(page);
+    await page.getByRole('button', { name: 'AI 写文章', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'AI 写文章', exact: true });
+    await dialog.getByLabel('主题与写作要求', { exact: true }).fill(`通过 ${label} 生成可编辑文章`);
+    const job = await startJob(page, dialog);
+    expect(job.protocol).toBe(protocol);
+    await expectCandidate(dialog);
+    await dialog.getByRole('button', { name: '采用生成结果', exact: true }).click();
+    const article = await save(page);
+    expect(article.title).toBe('AI 生成测试文章');
+    const completed = await readJob(page, job.id);
+    expect(completed.protocol).toBe(protocol);
+    expect(completed.state).toBe('SUCCEEDED');
+    expect(JSON.stringify(completed.result)).not.toContain('private reasoning');
+    const last = (await audit()).requests.at(-1)!;
+    expect(last.protocol).toBe(protocol);
+    expect(last.task).toBe('ARTICLE');
+    expect(last.maxTokens).toBe(protocol === 'anthropic-messages' ? 6144 : null);
+  }
+  const after = (await audit()).calls;
+  expect(after.text).toBe(before.text + 4);
+  expect(after.image).toBe(before.image);
 });
 
 test('模型配置、AI 图文候选与明确采用保存，完成模拟微信草稿闭环', async ({ page }, testInfo) => {

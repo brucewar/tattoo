@@ -8,6 +8,8 @@ P5 候选实现 `8bf5fea` 的 [CI](https://github.com/brucewar/tattoo/actions/ru
 
 本轮 P6–P8 的模型配置、生成、采用保护及模型密钥恢复检查见 [AI 创作验证记录](P6-P8-VERIFICATION.md)。真实模型调用未执行，不与既有模拟接口检查或真实微信权限混算。
 
+2026-11-24 补齐 Chat Completions、Responses、Anthropic Messages，升级兼容、三协议模拟调用及恢复的证据见 [文本协议验证记录](AI-PROTOCOLS-VERIFICATION.md)。
+
 验收对象是标准 Docker 部署；记录实际执行的平台，不要求特定 NAS 型号。已验证 Linux/amd64，其他平台未实测时注明范围。真实微信公众号验收仍需用户在自己的环境显式完成。
 
 ## AT 对照

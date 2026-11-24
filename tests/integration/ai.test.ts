@@ -11,6 +11,7 @@ import type {
   AiGenerationJob,
   AiModelConfig,
   AiModels,
+  AiTextProtocol,
   Article,
 } from '@tattoo/contracts';
 import { Client } from 'pg';
@@ -271,7 +272,10 @@ describe('AI 配置与生成 / 真实 API、PostgreSQL 和隔离模型接口', (
 
   it('文本和图片配置分别加密、脱敏与持久保存，空密钥保留原值', async () => {
     const text = await configure('text');
-    await configure('image');
+    const image = await configure('image');
+    expect(text.protocol).toBe('chat-completions');
+    expect(text.anthropicMaxTokens).toBe(4096);
+    expect(image.protocol).toBe('images-generations');
     expect(text.hasApiKey).toBe(true);
     const publicResponse = await request('/ai/models');
     const body = await publicResponse.text();
@@ -292,6 +296,222 @@ describe('AI 配置与生成 / 真实 API、PostgreSQL 和隔离模型接口', (
     const list = await data<AiModels>(await request('/ai/models'));
     expect(list.text?.model).toBe('test-text-model-updated');
     expect(list.image?.model).toBe('test-image-model');
+  });
+
+  it('升级旧数据库保留密钥与任务，并回填旧文本、图片配置和历史任务的协议', async () => {
+    const migrationSchema = `tattoo_ai_migration_${randomUUID().replaceAll('-', '')}`;
+    const migrations = resolve('apps/server/prisma/migrations');
+    const textId = randomUUID();
+    const imageId = randomUUID();
+    const preservedKey = new SecretBox(encryptionKey).encrypt(textKey);
+    await connection.query('BEGIN');
+    try {
+      await connection.query(`CREATE SCHEMA "${migrationSchema}"`);
+      await connection.query(`SET LOCAL search_path TO "${migrationSchema}"`);
+      for (const directory of ['20261120000000_initial', '20261123000000_ai_generation'])
+        await connection.query(
+          await readFile(join(migrations, directory, 'migration.sql'), 'utf8'),
+        );
+      for (const [id, capability] of [
+        [textId, 'text'],
+        [imageId, 'image'],
+      ]) {
+        await connection.query(
+          'INSERT INTO "AiModel" ("id", "capability", "baseUrl", "model", "apiKeyEncrypted", "version", "updatedAt") VALUES ($1, $2, $3, $4, $5, 7, NOW())',
+          [id, capability, modelBaseUrl, `legacy-${capability}`, preservedKey],
+        );
+        await connection.query(
+          'INSERT INTO "GenerationJob" ("id", "requestKey", "kind", "capability", "modelId", "model", "configVersion", "inputHash", "prompt", "state", "result", "updatedAt") VALUES ($1, $2, $3, $4, $5, $6, 7, $7, $8, $9, $10, NOW())',
+          [
+            randomUUID(),
+            randomUUID(),
+            capability === 'text' ? 'REWRITE' : 'COVER',
+            capability,
+            id,
+            `legacy-${capability}`,
+            'legacy-input-hash',
+            'legacy prompt',
+            'SUCCEEDED',
+            JSON.stringify({ type: 'text', text: 'preserved legacy result' }),
+          ],
+        );
+      }
+      await connection.query(
+        await readFile(join(migrations, '20261124000000_ai_protocols', 'migration.sql'), 'utf8'),
+      );
+      const configurations = await connection.query(
+        'SELECT "capability", "protocol", "anthropicMaxTokens", "version", "apiKeyEncrypted" FROM "AiModel" ORDER BY "capability"::text',
+      );
+      expect(configurations.rows).toEqual([
+        {
+          capability: 'image',
+          protocol: 'images-generations',
+          anthropicMaxTokens: 4096,
+          version: 7,
+          apiKeyEncrypted: preservedKey,
+        },
+        {
+          capability: 'text',
+          protocol: 'chat-completions',
+          anthropicMaxTokens: 4096,
+          version: 7,
+          apiKeyEncrypted: preservedKey,
+        },
+      ]);
+      const jobs = await connection.query(
+        'SELECT "capability", "protocol", "configVersion", "state", "result" FROM "GenerationJob" ORDER BY "capability"::text',
+      );
+      expect(jobs.rows).toEqual([
+        {
+          capability: 'image',
+          protocol: 'images-generations',
+          configVersion: 7,
+          state: 'SUCCEEDED',
+          result: { type: 'text', text: 'preserved legacy result' },
+        },
+        {
+          capability: 'text',
+          protocol: 'chat-completions',
+          configVersion: 7,
+          state: 'SUCCEEDED',
+          result: { type: 'text', text: 'preserved legacy result' },
+        },
+      ]);
+    } finally {
+      // Roll back the complete isolated schema, including fixtures and migrated tables.
+      await connection.query('ROLLBACK');
+    }
+  });
+
+  it.each(['chat-completions', 'responses', 'anthropic-messages'] as const)(
+    '%s 配置持久保存，并通过真实 HTTP 生成可编辑文章与改写结果',
+    async (protocol: AiTextProtocol) => {
+      const configured = await configure('text', { protocol, anthropicMaxTokens: 6144 });
+      const reloaded = (await data<AiModels>(await request('/ai/models'))).text!;
+      expect(reloaded.protocol).toBe(protocol);
+      expect(reloaded.version).toBe(configured.version);
+      expect(reloaded.anthropicMaxTokens).toBe(protocol === 'anthropic-messages' ? 6144 : 4096);
+      const before = model.calls.text;
+      const article = await enqueue('ARTICLE');
+      expect(article.protocol).toBe(protocol);
+      await processNext();
+      const completed = await getJob(article.id);
+      expect(completed.state).toBe('SUCCEEDED');
+      expect(completed.protocol).toBe(protocol);
+      expect(completed.result).toMatchObject({ type: 'article', title: 'AI 生成测试文章' });
+      expect(JSON.stringify(completed.result)).not.toContain('private reasoning');
+      const rewrite = await enqueue('REWRITE');
+      await processNext();
+      expect((await getJob(rewrite.id)).result).toEqual({
+        type: 'text',
+        text: '这是模型改写后的段落。',
+      });
+      expect(model.calls.text).toBe(before + 2);
+      const last = model.requests.at(-1)!;
+      const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+      expect(last.protocol).toBe(protocol);
+      expect(last.task).toBe('REWRITE');
+      expect(last.stream).toBe(false);
+      expect(last.authorizationHash).toBe(
+        hash(protocol === 'anthropic-messages' ? '' : 'Bearer ' + textKey),
+      );
+      expect(last.xApiKeyHash).toBe(hash(protocol === 'anthropic-messages' ? textKey : ''));
+      expect(last.anthropicVersion).toBe(protocol === 'anthropic-messages' ? '2023-06-01' : null);
+      expect(last.maxTokens).toBe(protocol === 'anthropic-messages' ? 6144 : null);
+      expect(last.store).toBe(protocol === 'responses' ? false : null);
+      const history = await data<{ items: AiGenerationJob[] }>(await request('/ai/jobs'));
+      expect(history.items.find((entry) => entry.id === article.id)?.protocol).toBe(protocol);
+    },
+  );
+
+  it('切换协议使排队任务失效并保留历史协议，输出上限变更也产生新配置版本', async () => {
+    const original = await configure('text', { protocol: 'responses' });
+    const queued = await enqueue('ARTICLE');
+    const before = model.calls.text;
+    const changed = await configure('text', {
+      apiKey: '',
+      protocol: 'anthropic-messages',
+      anthropicMaxTokens: 8192,
+    });
+    expect(changed.version).toBe(original.version + 1);
+    expect(changed.hasApiKey).toBe(true);
+    expect(changed.lastValidation).toBeNull();
+    await processNext();
+    const rejected = await getJob(queued.id);
+    expect(rejected.state).toBe('FAILED');
+    expect(rejected.protocol).toBe('responses');
+    expect(model.calls.text).toBe(before);
+    const same = await configure('text', {
+      apiKey: '',
+      protocol: 'anthropic-messages',
+      anthropicMaxTokens: 8192,
+    });
+    expect(same.version).toBe(changed.version);
+    const next = await configure('text', {
+      apiKey: '',
+      protocol: 'anthropic-messages',
+      anthropicMaxTokens: 12288,
+    });
+    expect(next.version).toBe(changed.version + 1);
+  });
+
+  it('拒绝能力与协议不匹配和非法 Anthropic 输出上限，保留原配置', async () => {
+    const original = await configure('text');
+    for (const [capability, overrides] of [
+      ['text', { protocol: 'images-generations' }],
+      ['image', { protocol: 'responses' }],
+      ['text', { protocol: 'unsupported' }],
+      ['text', { protocol: 'anthropic-messages', anthropicMaxTokens: 0 }],
+      ['text', { protocol: 'anthropic-messages', anthropicMaxTokens: 1.5 }],
+      ['text', { protocol: 'anthropic-messages', anthropicMaxTokens: 128001 }],
+    ] as const) {
+      const response = await request('/ai/models/' + capability, 'PUT', {
+        baseUrl: modelBaseUrl,
+        model: 'invalid-change',
+        ...overrides,
+      });
+      expect(response.status).toBe(400);
+    }
+    expect((await data<AiModels>(await request('/ai/models'))).text?.version).toBe(
+      original.version,
+    );
+  });
+
+  it.each(['responses', 'anthropic-messages'] as const)(
+    '%s 可明确清除凭据连接无密钥服务，不附带其他协议的鉴权头',
+    async (protocol) => {
+      await configure('text');
+      const cleared = await configure('text', { protocol, apiKey: '', clearApiKey: true });
+      expect(cleared.hasApiKey).toBe(false);
+      const job = await enqueue('TEST_TEXT');
+      await processNext();
+      expect((await getJob(job.id)).state).toBe('SUCCEEDED');
+      const last = model.requests.at(-1)!;
+      const emptyHash = createHash('sha256').update('').digest('hex');
+      expect(last.authorizationHash).toBe(emptyHash);
+      expect(last.xApiKeyHash).toBe(emptyHash);
+    },
+  );
+
+  it.each([
+    ['responses', 'truncated'],
+    ['responses', 'content-refused'],
+    ['responses', 'tool-output'],
+    ['anthropic-messages', 'truncated'],
+    ['anthropic-messages', 'content-refused'],
+    ['anthropic-messages', 'tool-output'],
+  ] as const)('%s %s 不产生可采用候选，也不自动重发', async (protocol, mode) => {
+    await configure('text', { protocol });
+    model.setNext({ nextText: mode });
+    const job = await enqueue('REWRITE');
+    const before = model.calls.text;
+    await processNext();
+    const completed = await getJob(job.id);
+    expect(completed.state).toBe('FAILED');
+    expect(completed.result).toBeNull();
+    expect(completed.error).toBeTruthy();
+    expect(await processNext()).toBe(false);
+    expect(model.calls.text).toBe(before + 1);
   });
 
   it('分别实际验证文本和图片能力，关闭微信写入也能生成，生成结果不自动改文章或投递', async () => {

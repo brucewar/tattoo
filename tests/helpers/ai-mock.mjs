@@ -1,8 +1,19 @@
 import { createHash } from 'node:crypto';
 
-const modes = ['success', 'refused', 'malformed', 'disconnect', 'invalid-image', 'url', 'hold'];
+const modes = [
+  'success',
+  'refused',
+  'malformed',
+  'disconnect',
+  'invalid-image',
+  'url',
+  'hold',
+  'truncated',
+  'content-refused',
+  'tool-output',
+];
 
-/** A local OpenAI-compatible fixture; it never forwards requests to another service. */
+/** Local protocol fixtures; they never forward requests to another service. */
 export function createAiMock(png) {
   const calls = { text: 0, image: 0 };
   const requests = [];
@@ -36,26 +47,39 @@ export function createAiMock(png) {
       outgoing.end(png);
       return true;
     }
-    const capability =
-      pathname === '/v1/chat/completions'
-        ? 'text'
-        : pathname === '/v1/images/generations'
-          ? 'image'
-          : null;
-    if (!capability) return false;
+    const protocol = {
+      '/v1/chat/completions': 'chat-completions',
+      '/v1/responses': 'responses',
+      '/v1/messages': 'anthropic-messages',
+      '/v1/images/generations': 'images-generations',
+    }[pathname];
+    if (!protocol) return false;
+    const capability = protocol === 'images-generations' ? 'image' : 'text';
     const input = JSON.parse(body.toString('utf8'));
-    const messages = (input.messages ?? []).map((message) => message.content ?? '').join('\n');
-    const task = /TASK:(ARTICLE|REWRITE|TEST_TEXT)/.exec(messages)?.[1] ?? 'UNKNOWN';
+    const instructions = [
+      input.instructions ?? '',
+      input.system ?? '',
+      ...(input.messages ?? []).map((message) => message.content ?? ''),
+    ].join('\n');
+    const task = /TASK:(ARTICLE|REWRITE|TEST_TEXT)/.exec(instructions)?.[1] ?? 'UNKNOWN';
     calls[capability]++;
     requests.push({
       capability,
+      protocol,
       task,
       model: input.model,
       prompt: typeof input.prompt === 'string' ? input.prompt : '',
       size: input.size ?? null,
       responseFormat: input.response_format ?? null,
+      maxTokens: input.max_tokens ?? null,
+      store: input.store ?? null,
+      stream: input.stream ?? null,
+      anthropicVersion: incoming.headers['anthropic-version'] ?? null,
       authorizationHash: createHash('sha256')
         .update(String(incoming.headers.authorization ?? ''))
+        .digest('hex'),
+      xApiKeyHash: createHash('sha256')
+        .update(String(incoming.headers['x-api-key'] ?? ''))
         .digest('hex'),
     });
     const mode = capability === 'text' ? nextText : nextImage;
@@ -90,7 +114,65 @@ export function createAiMock(png) {
           : task === 'REWRITE'
             ? '这是模型改写后的段落。'
             : '模型文字验证成功';
-      outgoing.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }] }));
+      if (protocol === 'responses') {
+        outgoing.end(
+          JSON.stringify({
+            id: 'resp_fixture',
+            object: 'response',
+            status: mode === 'truncated' ? 'incomplete' : 'completed',
+            incomplete_details: mode === 'truncated' ? { reason: 'max_output_tokens' } : null,
+            output: [
+              { type: 'reasoning', id: 'rs_fixture', summary: [], content: 'private reasoning' },
+              ...(mode === 'tool-output'
+                ? [{ type: 'function_call', name: 'unexpected_tool', arguments: '{}' }]
+                : [
+                    {
+                      type: 'message',
+                      role: 'assistant',
+                      status: 'completed',
+                      content:
+                        mode === 'content-refused'
+                          ? [{ type: 'refusal', refusal: 'fixture refused this request' }]
+                          : [{ type: 'output_text', text: content, annotations: [] }],
+                    },
+                  ]),
+            ],
+          }),
+        );
+      } else if (protocol === 'anthropic-messages') {
+        outgoing.end(
+          JSON.stringify({
+            id: 'msg_fixture',
+            type: 'message',
+            role: 'assistant',
+            stop_reason:
+              mode === 'truncated'
+                ? 'max_tokens'
+                : mode === 'tool-output'
+                  ? 'tool_use'
+                  : mode === 'content-refused'
+                    ? 'refusal'
+                    : 'end_turn',
+            content: [
+              { type: 'thinking', thinking: 'private reasoning', signature: 'fixture' },
+              ...(mode === 'tool-output'
+                ? [{ type: 'tool_use', id: 'tool_fixture', name: 'unexpected_tool', input: {} }]
+                : [{ type: 'text', text: content }]),
+            ],
+          }),
+        );
+      } else {
+        outgoing.end(
+          JSON.stringify({
+            choices: [
+              {
+                message: { content },
+                finish_reason: mode === 'truncated' ? 'length' : 'stop',
+              },
+            ],
+          }),
+        );
+      }
     } else {
       outgoing.end(
         JSON.stringify({

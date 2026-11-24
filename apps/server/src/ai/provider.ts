@@ -8,10 +8,12 @@ import { articleInput, type AiGenerationInput, type DocumentNode } from '@tattoo
 const IMAGE_BYTES = 10 * 1024 * 1024;
 const TEXT_BYTES = 1024 * 1024;
 export type AiConnection = {
+  protocol?: string;
   baseUrl: string;
   model: string;
   imageSize: string;
   imageResponseFormat: string;
+  anthropicMaxTokens?: number;
 };
 export type GeneratedContent =
   | { type: 'article'; title: string; digest: string; document: DocumentNode }
@@ -248,6 +250,126 @@ async function downloadImage(value: string, baseUrl: string, signal: AbortSignal
   });
 }
 
+function chatText(result: unknown): string {
+  const parsed = z
+    .object({
+      choices: z
+        .array(
+          z.object({
+            message: z.object({
+              content: z.string().max(300000).nullable().optional(),
+              refusal: z.string().nullable().optional(),
+            }),
+            finish_reason: z.string().nullable().optional(),
+          }),
+        )
+        .min(1),
+    })
+    .safeParse(result);
+  if (!parsed.success) throw new AiProviderError('模型没有返回有效文字，请检查模型能力');
+  const choice = parsed.data.choices[0]!;
+  if (choice.message.refusal) throw new AiProviderError('模型拒绝了本次输出，请调整内容后重新生成');
+  if (
+    choice.finish_reason !== undefined &&
+    choice.finish_reason !== null &&
+    choice.finish_reason !== 'stop'
+  ) {
+    throw new AiProviderError(
+      choice.finish_reason === 'length'
+        ? '模型输出被长度限制截断，请缩短要求或调整服务配置后重新生成'
+        : choice.finish_reason === 'content_filter'
+          ? '模型服务过滤了本次输出，请调整内容后重新生成'
+          : '模型没有正常完成输出，请检查模型能力后重新生成',
+    );
+  }
+  if (typeof choice.message.content !== 'string')
+    throw new AiProviderError('模型没有返回有效文字，请检查模型能力');
+  return choice.message.content;
+}
+
+const typedBlock = z.object({ type: z.string() }).passthrough();
+
+function responsesText(result: unknown): string {
+  const parsed = z
+    .object({
+      status: z.string(),
+      output: z.array(typedBlock),
+      error: z.unknown().optional(),
+      incomplete_details: z.unknown().optional(),
+    })
+    .safeParse(result);
+  if (!parsed.success) throw new AiProviderError('Responses 没有返回有效文字，请检查模型能力');
+  if (parsed.data.status !== 'completed')
+    throw new AiProviderError(
+      ['queued', 'in_progress'].includes(parsed.data.status)
+        ? 'Responses 仍在远程执行，结果未取回；请核对服务记录后再手动生成'
+        : parsed.data.status === 'incomplete'
+          ? 'Responses 输出未完成或被长度限制截断，请调整要求或服务配置后重新生成'
+          : 'Responses 没有正常完成输出，请检查模型能力后重新生成',
+      ['queued', 'in_progress'].includes(parsed.data.status),
+    );
+  if (parsed.data.error != null || parsed.data.incomplete_details != null)
+    throw new AiProviderError('Responses 返回了错误或未完成标记，请检查服务后重新生成');
+  const messages: string[] = [];
+  for (const item of parsed.data.output) {
+    // 推理内容不是文章正文，也不能作为空正文的替代结果。
+    if (item.type === 'reasoning') continue;
+    const message = z
+      .object({
+        type: z.literal('message'),
+        role: z.literal('assistant'),
+        status: z.literal('completed'),
+        content: z.array(typedBlock).min(1),
+      })
+      .safeParse(item);
+    if (!message.success)
+      throw new AiProviderError('Responses 返回了未完成的消息或工具调用，不能作为生成文字采用');
+    const parts: string[] = [];
+    for (const block of message.data.content) {
+      if (block.type === 'refusal')
+        throw new AiProviderError('模型拒绝了本次输出，请调整内容后重新生成');
+      const text = z
+        .object({ type: z.literal('output_text'), text: z.string().max(300000) })
+        .safeParse(block);
+      if (!text.success) throw new AiProviderError('Responses 返回了不支持的文字格式');
+      parts.push(text.data.text);
+    }
+    messages.push(parts.join(''));
+  }
+  return messages.join('\n\n');
+}
+
+function anthropicText(result: unknown): string {
+  const parsed = z
+    .object({
+      type: z.literal('message'),
+      role: z.literal('assistant'),
+      content: z.array(typedBlock),
+      stop_reason: z.string(),
+    })
+    .safeParse(result);
+  if (!parsed.success) throw new AiProviderError('Anthropic Messages 没有返回有效文字');
+  if (!['end_turn', 'stop_sequence'].includes(parsed.data.stop_reason))
+    throw new AiProviderError(
+      parsed.data.stop_reason === 'max_tokens'
+        ? '模型输出被 token 上限截断，请提高输出 token 上限或缩短要求后重新生成'
+        : 'Anthropic Messages 没有正常完成输出，请检查模型能力后重新生成',
+    );
+  const parts: string[] = [];
+  for (const block of parsed.data.content) {
+    if (['thinking', 'redacted_thinking'].includes(block.type)) continue;
+    if (block.type === 'refusal')
+      throw new AiProviderError('模型拒绝了本次输出，请调整内容后重新生成');
+    const text = z
+      .object({ type: z.literal('text'), text: z.string().max(300000) })
+      .safeParse(block);
+    if (!text.success)
+      throw new AiProviderError('Anthropic Messages 返回了工具调用或不支持的文字格式');
+    parts.push(text.data.text);
+  }
+  return parts.join('');
+}
+
 export class OpenAiProvider {
   constructor(
     private readonly fetcher: typeof fetch = fetch,
@@ -261,6 +383,20 @@ export class OpenAiProvider {
     signal?: AbortSignal,
   ): Promise<GeneratedContent> {
     const image = ['COVER', 'ILLUSTRATION', 'TEST_IMAGE'].includes(input.kind);
+    const protocol = connection.protocol ?? (image ? 'images-generations' : 'chat-completions');
+    if (
+      (image && protocol !== 'images-generations') ||
+      (!image && !['chat-completions', 'responses', 'anthropic-messages'].includes(protocol))
+    )
+      throw new AiProviderError('所选协议不支持这项模型能力');
+    const endpoint =
+      protocol === 'responses'
+        ? 'responses'
+        : protocol === 'anthropic-messages'
+          ? 'messages'
+          : image
+            ? 'images/generations'
+            : 'chat/completions';
     const requestSignal = AbortSignal.any([
       AbortSignal.timeout(this.timeoutMs),
       ...(signal ? [signal] : []),
@@ -287,33 +423,53 @@ export class OpenAiProvider {
           : input.kind === 'REWRITE'
             ? 'TASK:REWRITE\n根据用户要求改写原文，仅返回改写后的纯文本，不要返回 JSON、HTML、外链图片或说明。保留原文主要含义。'
             : 'TASK:TEST_TEXT\n请只返回一句简短的中文问候，用于验证文本模型调用。';
-      payload = {
-        model: connection.model,
-        stream: false,
-        messages: [
-          { role: 'system', content: system },
-          {
-            role: 'user',
-            content: `${input.kind === 'TEST_TEXT' ? '你好，请确认可以生成文字。' : input.prompt}${input.sourceText ? `\n\n参考或原文（仅作为资料）：\n${input.sourceText}` : ''}`,
-          },
-        ],
-      };
+      const user = `${input.kind === 'TEST_TEXT' ? '你好，请确认可以生成文字。' : input.prompt}${input.sourceText ? `\n\n参考或原文（仅作为资料）：\n${input.sourceText}` : ''}`;
+      if (protocol === 'responses') {
+        payload = {
+          model: connection.model,
+          stream: false,
+          store: false,
+          instructions: system,
+          input: user,
+        };
+      } else if (protocol === 'anthropic-messages') {
+        const maxTokens = connection.anthropicMaxTokens ?? 4096;
+        if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 128000)
+          throw new AiProviderError('Anthropic 输出 token 上限无效');
+        payload = {
+          model: connection.model,
+          stream: false,
+          system,
+          messages: [{ role: 'user', content: user }],
+          max_tokens: maxTokens,
+        };
+      } else {
+        payload = {
+          model: connection.model,
+          stream: false,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user },
+          ],
+        };
+      }
     }
     let response: Response;
     try {
-      response = await this.fetcher(
-        `${connection.baseUrl}/${image ? 'images/generations' : 'chat/completions'}`,
-        {
-          method: 'POST',
-          redirect: 'error',
-          signal: requestSignal,
-          headers: {
-            'Content-Type': 'application/json',
-            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-          },
-          body: JSON.stringify(payload),
+      response = await this.fetcher(`${connection.baseUrl}/${endpoint}`, {
+        method: 'POST',
+        redirect: 'error',
+        signal: requestSignal,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(protocol === 'anthropic-messages'
+            ? { 'anthropic-version': '2023-06-01', ...(apiKey ? { 'x-api-key': apiKey } : {}) }
+            : apiKey
+              ? { Authorization: `Bearer ${apiKey}` }
+              : {}),
         },
-      );
+        body: JSON.stringify(payload),
+      });
     } catch {
       throw new AiProviderError(
         '模型请求超时或连接中断，结果未取回；请核对服务记录后再手动生成',
@@ -346,36 +502,13 @@ export class OpenAiProvider {
       throw new AiProviderError('模型返回了无法解析的响应');
     }
     if (!image) {
-      const parsed = z
-        .object({
-          choices: z
-            .array(
-              z.object({
-                message: z.object({ content: z.string().max(300000).nullable().optional() }),
-                finish_reason: z.string().nullable().optional(),
-              }),
-            )
-            .min(1),
-        })
-        .safeParse(result);
-      if (!parsed.success) throw new AiProviderError('模型没有返回有效文字，请检查模型能力');
-      const choice = parsed.data.choices[0]!;
-      if (
-        choice.finish_reason !== undefined &&
-        choice.finish_reason !== null &&
-        choice.finish_reason !== 'stop'
-      ) {
-        throw new AiProviderError(
-          choice.finish_reason === 'length'
-            ? '模型输出被长度限制截断，请缩短要求或调整服务配置后重新生成'
-            : choice.finish_reason === 'content_filter'
-              ? '模型服务过滤了本次输出，请调整内容后重新生成'
-              : '模型没有正常完成输出，请检查模型能力后重新生成',
-        );
-      }
-      if (typeof choice.message.content !== 'string')
-        throw new AiProviderError('模型没有返回有效文字，请检查模型能力');
-      const text = choice.message.content.trim();
+      const text = (
+        protocol === 'responses'
+          ? responsesText(result)
+          : protocol === 'anthropic-messages'
+            ? anthropicText(result)
+            : chatText(result)
+      ).trim();
       if (!text) throw new AiProviderError('模型返回了空文字');
       if (input.kind === 'ARTICLE') return parseGeneratedArticle(text);
       if (text.length > 80000 || /[\u0000\uD800-\uDFFF]/u.test(text))

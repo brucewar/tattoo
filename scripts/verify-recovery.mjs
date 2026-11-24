@@ -310,12 +310,15 @@ async function checkRestored(fixture) {
         assert.equal(new SecretBox(process.env.APP_ENCRYPTION_KEY).decrypt(account.secretEncrypted), fixture.secret);
         const model = await db.aiModel.findUniqueOrThrow({ where: { capability: 'text' } });
         assert.equal(new SecretBox(process.env.APP_ENCRYPTION_KEY).decrypt(model.apiKeyEncrypted), fixture.aiSecret);
+        assert.equal(model.protocol, 'anthropic-messages');
+        assert.equal(model.anthropicMaxTokens, 8192);
         const generationJobs = await db.generationJob.findMany({ where: { modelId: model.id } });
         assert.equal(generationJobs.length, fixture.generationJobs.length);
         for (const expected of fixture.generationJobs) {
           const actual = generationJobs.find((row) => row.id === expected.id);
           assert.ok(actual);
           assert.equal(actual.model, 'recovery-text-fixture');
+          assert.equal(actual.protocol, 'anthropic-messages');
           if (['QUEUED', 'RUNNING'].includes(expected.state)) {
             assert.equal(actual.state, 'UNCERTAIN');
             assert.equal(actual.executionId, null);
@@ -471,8 +474,10 @@ try {
     method: 'PUT',
     cookie: sourceCookie,
     json: {
-      baseUrl: 'https://api.openai.com/v1',
+      protocol: 'anthropic-messages',
+      baseUrl: 'https://api.anthropic.com/v1',
       model: 'recovery-text-fixture',
+      anthropicMaxTokens: 8192,
       apiKey: aiSecret,
     },
   });
@@ -518,7 +523,7 @@ try {
         for (const row of fixture.generationJobs) {
           await db.generationJob.create({ data: {
             id: row.id, requestKey: randomUUID(), kind: 'TEST_TEXT', capability: 'text',
-            modelId: model.id, model: model.model, configVersion: model.version,
+              modelId: model.id, model: model.model, protocol: model.protocol, configVersion: model.version,
             inputHash: 'recovery-fixture', prompt: '恢复验收，仅准备旧任务，不发出模型请求',
             state: row.state,
             executionId: row.state === 'RUNNING' ? randomUUID() : null,
@@ -629,6 +634,8 @@ try {
   const restoredModels = JSON.parse(restoredModelsText).data;
   assert.equal(restoredModels.text.model, 'recovery-text-fixture');
   assert.equal(restoredModels.text.hasApiKey, true);
+  assert.equal(restoredModels.text.protocol, 'anthropic-messages');
+  assert.equal(restoredModels.text.anthropicMaxTokens, 8192);
   const current = (
     await (await http(target, '/articles/' + fixture.articleId, { cookie: targetCookie })).json()
   ).data;

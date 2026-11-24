@@ -65,13 +65,14 @@ export class AiService {
     });
     return {
       capability: model.capability,
-      protocol: 'openai-compatible',
+      protocol: model.protocol as AiModelConfig['protocol'],
       baseUrl: model.baseUrl,
       model: model.model,
       hasApiKey: Boolean(model.apiKeyEncrypted),
       version: model.version,
       imageSize: model.imageSize,
       imageResponseFormat: model.imageResponseFormat as AiModelConfig['imageResponseFormat'],
+      anthropicMaxTokens: model.anthropicMaxTokens,
       updatedAt: model.updatedAt.toISOString(),
       lastValidation: verification
         ? {
@@ -94,6 +95,10 @@ export class AiService {
   async saveModel(kind: unknown, value: unknown): Promise<AiModelConfig> {
     const selected = parse(z.enum(['text', 'image']), kind);
     const input = parse(aiModelInput, value);
+    const protocol =
+      input.protocol ?? (selected === 'text' ? 'chat-completions' : 'images-generations');
+    if ((selected === 'image') !== (protocol === 'images-generations'))
+      throw new BadRequestException('所选协议不支持这项模型能力，请分别配置文本与图片模型');
     if (input.clearApiKey && input.apiKey)
       throw new BadRequestException('清除密钥和设置新密钥不能同时执行');
     let baseUrl: string;
@@ -123,10 +128,12 @@ export class AiService {
       )
         throw new ConflictException('该模型正在生成内容，请等待任务结束后再修改配置');
       const fields = {
+        protocol,
         baseUrl,
         model: input.model,
         imageSize: selected === 'image' ? input.imageSize : '',
         imageResponseFormat: selected === 'image' ? input.imageResponseFormat : 'auto',
+        anthropicMaxTokens: protocol === 'anthropic-messages' ? input.anthropicMaxTokens : 4096,
       };
       if (
         existing?.apiKeyEncrypted &&
@@ -141,6 +148,8 @@ export class AiService {
         !input.clearApiKey &&
         existing.baseUrl === fields.baseUrl &&
         existing.model === fields.model &&
+        existing.protocol === fields.protocol &&
+        existing.anthropicMaxTokens === fields.anthropicMaxTokens &&
         existing.imageSize === fields.imageSize &&
         existing.imageResponseFormat === fields.imageResponseFormat
       )
@@ -166,6 +175,7 @@ export class AiService {
       requestKey: job.requestKey,
       kind: job.kind,
       capability: job.capability,
+      protocol: job.protocol as AiGenerationJob['protocol'],
       model: job.model,
       configVersion: job.configVersion,
       state: job.state,
@@ -224,6 +234,7 @@ export class AiService {
           capability: selected,
           modelId: model.id,
           model: model.model,
+          protocol: model.protocol,
           configVersion: model.version,
           prompt: input.prompt,
           sourceText,

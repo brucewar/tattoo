@@ -36,7 +36,7 @@ docker compose up -d --build --wait
 
 配置文件已存在时跳过配置生成，避免覆盖密钥。启动后访问 `http://localhost:8080`，使用本机 `.env` 的管理员配置登录。AppID/AppSecret 在账号设置页填写；创建测试草稿还需显式启用远程写入，步骤见开发说明。
 
-登录后从左侧“模型配置”分别设置文本和图片模型的服务地址、模型名称及 API Key，执行各自的实际生成验证。首批支持 OpenAI 兼容接口，文本与图片可以使用不同服务；密钥仅在本机页面填写。编辑器中提供 AI 写作、改写、封面及插图生成，候选由用户明确采用，再保存为修订。配置与使用细节见 [模型配置与 AI 创作](docs/MODELS.md)。
+登录后从左侧“模型配置”分别设置文本和图片模型的服务地址、模型名称及 API Key，执行各自的实际生成验证。文本协议支持 Chat Completions、Responses 和 Anthropic Messages；图片使用独立的 Images Generations 接口，两者可以使用不同服务。密钥仅在本机页面填写。编辑器中提供 AI 写作、改写、封面及插图生成，候选由用户明确采用，再保存为修订。配置与使用细节见 [模型配置与 AI 创作](docs/MODELS.md)。
 
 运行维护、停机备份恢复和升级步骤见 [运维说明](docs/OPERATIONS.md)，自动验收与真实微信检查见 [验收索引](docs/ACCEPTANCE.md) 和 [P5 验证记录](docs/P5-VERIFICATION.md)。
 

@@ -5,6 +5,7 @@ import type {
   AiGenerationKind,
   AiGenerationResult,
   AiGenerationState,
+  AiProtocol,
   DocumentNode,
 } from '@tattoo/contracts';
 import { api, errorMessage } from '../../api';
@@ -17,6 +18,13 @@ export const generationLabels: Record<AiGenerationKind, string> = {
   ILLUSTRATION: '插图生成',
   TEST_TEXT: '文本模型验证',
   TEST_IMAGE: '图片模型验证',
+};
+
+export const protocolLabels: Record<AiProtocol, string> = {
+  'chat-completions': 'Chat Completions',
+  responses: 'Responses',
+  'anthropic-messages': 'Anthropic Messages',
+  'images-generations': 'Images Generations',
 };
 
 const states: Record<AiGenerationState, { label: string; color: string }> = {
@@ -154,7 +162,7 @@ export function GenerationDetail({ id, onClose }: { id: string; onClose: () => v
       {job && (
         <>
           <p className="secondary">
-            {generationLabels[job.kind]} · {date(job.createdAt)}
+            {generationLabels[job.kind]} · {protocolLabels[job.protocol]} · {date(job.createdAt)}
           </p>
           <GenerationProgress job={job} />
           {job.prompt && <p className="ai-task-prompt">{job.prompt}</p>}

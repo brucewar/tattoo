@@ -273,6 +273,313 @@ describe('AI 接口请求、生成结果与凭据保护', () => {
   });
 });
 
+describe('Responses 与 Anthropic Messages 文本协议', () => {
+  const responses = (text: string, overrides: Record<string, unknown> = {}) => ({
+    status: 'completed',
+    output: [
+      {
+        type: 'message',
+        role: 'assistant',
+        status: 'completed',
+        content: [{ type: 'output_text', text }],
+      },
+    ],
+    ...overrides,
+  });
+  const message = (text: string, overrides: Record<string, unknown> = {}) => ({
+    type: 'message',
+    role: 'assistant',
+    content: [{ type: 'text', text }],
+    stop_reason: 'end_turn',
+    ...overrides,
+  });
+  const article = JSON.stringify({ title: '多协议文章', digest: '统一编辑流程', body: '完整正文' });
+
+  it('Responses 使用独立端点、instructions 和原始 output 数组，不存储远程对话', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(responses(article)));
+    const result = await new OpenAiProvider(fetcher).generate(
+      { ...connection, protocol: 'responses' },
+      input(),
+      key,
+    );
+    expect(result).toMatchObject({ type: 'article', title: '多协议文章' });
+    const [url, request] = fetcher.mock.calls[0]!;
+    expect(url).toBe('https://models.example/v1/responses');
+    expect(request).toMatchObject({
+      method: 'POST',
+      redirect: 'error',
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    const body = JSON.parse(String(request?.body));
+    expect(body).toEqual({
+      model: 'configured-model',
+      stream: false,
+      store: false,
+      instructions: expect.stringContaining('TASK:ARTICLE'),
+      input: expect.stringContaining('可用参考资料'),
+    });
+    expect(JSON.stringify(body)).not.toContain(key);
+  });
+
+  it('Responses 只合并完整 assistant 消息的 output_text，不采用推理摘要', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      json({
+        status: 'completed',
+        output: [
+          { type: 'reasoning', summary: [{ type: 'summary_text', text: '私有推理' }] },
+          {
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [
+              { type: 'output_text', text: '新的' },
+              { type: 'output_text', text: '表达' },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(
+      await new OpenAiProvider(fetcher).generate(
+        { ...connection, protocol: 'responses' },
+        input('REWRITE'),
+        '',
+      ),
+    ).toEqual({ type: 'text', text: '新的表达' });
+    expect(fetcher.mock.calls[0]![1]?.headers).not.toHaveProperty('Authorization');
+  });
+
+  it.each(['incomplete', 'failed', 'cancelled'])(
+    'Responses %s 不能伪装成完整文章',
+    async (status) => {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(responses(article, { status })));
+      await expect(
+        new OpenAiProvider(fetcher).generate(
+          { ...connection, protocol: 'responses' },
+          input(),
+          key,
+        ),
+      ).rejects.toMatchObject({ uncertain: false });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(['in_progress', 'queued'])(
+    'Responses %s 仍可能在远程执行，应标记结果未取回且不自动重发',
+    async (status) => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(json(responses('', { status, output: [] })));
+      await expect(
+        new OpenAiProvider(fetcher).generate(
+          { ...connection, protocol: 'responses' },
+          input(),
+          key,
+        ),
+      ).rejects.toMatchObject({ uncertain: true });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    { error: { message: `private ${key}` } },
+    { incomplete_details: { reason: 'max_output_tokens' } },
+    { output: [{ type: 'function_call', name: 'tool', arguments: '{}' }] },
+    { output: [{ type: 'reasoning', summary: [{ text: '只有推理' }] }] },
+    { output: [], output_text: 'SDK 便利字段不能替代真实消息' },
+    {
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          status: 'incomplete',
+          content: [{ type: 'output_text', text: '半句话' }],
+        },
+      ],
+    },
+    {
+      output: [
+        {
+          type: 'message',
+          role: 'user',
+          status: 'completed',
+          content: [{ type: 'output_text', text: '回显输入' }],
+        },
+      ],
+    },
+    {
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [
+            { type: 'output_text', text: '有文字也不能忽略拒绝' },
+            { type: 'refusal', refusal: 'private refusal detail' },
+          ],
+        },
+      ],
+    },
+  ])('Responses 的工具调用、未完成消息和拒绝必须失败：%j', async (overrides) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(responses('文字', overrides)));
+    await expect(
+      new OpenAiProvider(fetcher).generate(
+        { ...connection, protocol: 'responses' },
+        input('REWRITE'),
+        key,
+      ),
+    ).rejects.toMatchObject({ uncertain: false });
+  });
+
+  it('Anthropic 使用顶层 system、user 消息、x-api-key 和明确版本及 token 上限', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(message(article)));
+    const result = await new OpenAiProvider(fetcher).generate(
+      { ...connection, protocol: 'anthropic-messages', anthropicMaxTokens: 8192 },
+      input(),
+      key,
+    );
+    expect(result).toMatchObject({ type: 'article', title: '多协议文章' });
+    const [url, request] = fetcher.mock.calls[0]!;
+    expect(url).toBe('https://models.example/v1/messages');
+    expect(request).toMatchObject({
+      method: 'POST',
+      redirect: 'error',
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+    });
+    expect(request?.headers).not.toHaveProperty('Authorization');
+    const body = JSON.parse(String(request?.body));
+    expect(body).toEqual({
+      model: 'configured-model',
+      stream: false,
+      max_tokens: 8192,
+      system: expect.stringContaining('TASK:ARTICLE'),
+      messages: [{ role: 'user', content: expect.stringContaining('可用参考资料') }],
+    });
+    expect(JSON.stringify(result)).not.toContain(key);
+  });
+
+  it('Anthropic 验证默认使用 4096 token，无密钥服务仍发送版本头，文字不包含 thinking', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      json(
+        message('', {
+          content: [
+            { type: 'thinking', thinking: '私有推理', signature: 'signed' },
+            { type: 'redacted_thinking', data: 'private' },
+            { type: 'text', text: '你' },
+            { type: 'text', text: '好' },
+          ],
+          stop_reason: 'stop_sequence',
+        }),
+      ),
+    );
+    expect(
+      await new OpenAiProvider(fetcher).generate(
+        { ...connection, protocol: 'anthropic-messages' },
+        input('TEST_TEXT'),
+        '',
+      ),
+    ).toEqual({ type: 'text', text: '你好' });
+    const request = fetcher.mock.calls[0]![1]!;
+    expect(request.headers).not.toHaveProperty('x-api-key');
+    expect(request.headers).not.toHaveProperty('Authorization');
+    const body = JSON.parse(String(request.body));
+    expect(body.max_tokens).toBe(4096);
+    expect(body.system).toContain('TASK:TEST_TEXT');
+  });
+
+  it.each(['max_tokens', 'tool_use', 'refusal', 'pause_turn', '', null])(
+    'Anthropic 停止原因 %s 不能作为完整改写采用',
+    async (stop_reason) => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(json(message('半句话', { stop_reason })));
+      await expect(
+        new OpenAiProvider(fetcher).generate(
+          { ...connection, protocol: 'anthropic-messages' },
+          input('REWRITE'),
+          key,
+        ),
+      ).rejects.toMatchObject({ uncertain: false });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    { content: [{ type: 'tool_use', name: 'tool', input: {} }] },
+    {
+      content: [
+        { type: 'text', text: '部分文字' },
+        { type: 'refusal', text: 'private' },
+      ],
+    },
+    { content: [{ type: 'thinking', thinking: '只有推理' }] },
+    { content: [{ type: 'text', text: 123 }] },
+    { type: 'error', error: { message: `private ${key}` } },
+    { role: 'user' },
+  ])('Anthropic 的工具调用和损坏内容不会进入正文：%j', async (overrides) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(message('文字', overrides)));
+    await expect(
+      new OpenAiProvider(fetcher).generate(
+        { ...connection, protocol: 'anthropic-messages' },
+        input('REWRITE'),
+        key,
+      ),
+    ).rejects.toMatchObject({ uncertain: false });
+  });
+
+  it.each(['responses', 'anthropic-messages'])(
+    '%s 共用输出字符限制、脱敏错误和中断语义，不自动重发',
+    async (protocol) => {
+      const make = protocol === 'responses' ? responses : message;
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(json(make('\ud800')))
+        .mockResolvedValueOnce(json(make('字'.repeat(80001))))
+        .mockResolvedValueOnce(json({ error: { message: `private ${key}` } }, 429));
+      const provider = new OpenAiProvider(fetcher);
+      for (let index = 0; index < 3; index++) {
+        await expect(
+          provider.generate({ ...connection, protocol }, input('REWRITE'), key),
+        ).rejects.toMatchObject({ uncertain: false });
+      }
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      const waiting = vi.fn<typeof fetch>().mockImplementation(
+        (_url, request) =>
+          new Promise((_resolve, reject) => {
+            request?.signal?.addEventListener('abort', () => reject(new Error(`private ${key}`)), {
+              once: true,
+            });
+          }),
+      );
+      const abort = new AbortController();
+      const execution = new OpenAiProvider(waiting).generate(
+        { ...connection, protocol },
+        input('REWRITE'),
+        key,
+        abort.signal,
+      );
+      abort.abort();
+      await expect(execution).rejects.toMatchObject({ uncertain: true });
+      expect(waiting).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('未知协议和能力不匹配在发请求前拒绝', async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const provider = new OpenAiProvider(fetcher);
+    await expect(
+      provider.generate({ ...connection, protocol: 'unknown' }, input(), key),
+    ).rejects.toThrow('协议');
+    await expect(
+      provider.generate({ ...connection, protocol: 'responses' }, input('COVER'), key),
+    ).rejects.toThrow('协议');
+    await expect(
+      provider.generate({ ...connection, protocol: 'images-generations' }, input(), key),
+    ).rejects.toThrow('协议');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
 describe('模型文字与配置输入', () => {
   it('文章 JSON 校验结构，正文中的 HTML 和远程图片仅作为文字', () => {
     const result = parseGeneratedArticle(
@@ -338,6 +645,21 @@ describe('模型文字与配置输入', () => {
     expect(aiModelInput.safeParse({ ...valid, model: '\ud800' }).success).toBe(false);
     expect(aiModelInput.safeParse({ ...valid, apiKey: 'contains a space' }).success).toBe(false);
     expect(aiModelInput.safeParse({ ...valid, apiKey: 'emoji-🔑' }).success).toBe(false);
+  });
+  it('协议枚举明确，旧配置仍可省略协议，Anthropic token 上限有界且不接受字符串', () => {
+    const valid = { baseUrl: 'https://models.example/v1', model: 'configured-model' };
+    expect(aiModelInput.parse(valid)).toMatchObject({ anthropicMaxTokens: 4096 });
+    for (const protocol of [
+      'chat-completions',
+      'responses',
+      'anthropic-messages',
+      'images-generations',
+    ])
+      expect(aiModelInput.safeParse({ ...valid, protocol }).success).toBe(true);
+    expect(aiModelInput.safeParse({ ...valid, protocol: 'openai-compatible' }).success).toBe(false);
+    for (const anthropicMaxTokens of [0, -1, 1.5, 128001, '4096'])
+      expect(aiModelInput.safeParse({ ...valid, anthropicMaxTokens }).success).toBe(false);
+    expect(aiModelInput.safeParse({ ...valid, anthropicMaxTokens: 128000 }).success).toBe(true);
   });
   it('Base URL 正规化但不猜测 /v1，HTTPS 与本机 HTTP 可用', () => {
     expect(normalizeModelBaseUrl('https://models.example/custom/v1/')).toBe(

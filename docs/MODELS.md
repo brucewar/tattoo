@@ -6,19 +6,33 @@
 
 登录后进入“模型配置”。文本模型和图片模型分别保存，可使用不同服务地址、密钥与模型名称。
 
-| 字段         | 填写方式                                                                                            |
-| ------------ | --------------------------------------------------------------------------------------------------- |
-| 服务地址     | 填写服务的 Base URL，包含所需版本路径，例如 `https://api.openai.com/v1`；不填写密钥或完整生成端点。 |
-| 模型名称     | 填写服务商实际提供的模型 ID；项目不把某个固定模型名写进业务流程。                                   |
-| API Key      | 仅在自己的页面输入。后端加密保存，读取不返回原值；修改时留空保留原密钥，无需密钥的本机服务可留空。  |
-| 图片尺寸     | 只用于图片模型，留空使用服务默认值，或填写所选模型支持的宽高。                                      |
-| 图片返回格式 | 默认“自动”，不发送 `response_format`；只有所选服务要求时才明确选择 `b64_json` 或 `url`。            |
+| 字段            | 填写方式                                                                                            |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| 文本协议        | 根据服务商选择 Chat Completions、Responses 或 Anthropic Messages；与模型名称分别配置。              |
+| 服务地址        | 填写服务的 Base URL，包含所需版本路径，例如 `https://api.openai.com/v1`；不填写密钥或完整生成端点。 |
+| 模型名称        | 填写服务商实际提供的模型 ID；项目不把某个固定模型名写进业务流程。                                   |
+| API Key         | 仅在自己的页面输入。后端加密保存，读取不返回原值；修改时留空保留原密钥，无需密钥的本机服务可留空。  |
+| 图片尺寸        | 只用于图片模型，留空使用服务默认值，或填写所选模型支持的宽高。                                      |
+| 图片返回格式    | 默认“自动”，不发送 `response_format`；只有所选服务要求时才明确选择 `b64_json` 或 `url`。            |
+| 最大输出 tokens | 仅 Anthropic Messages 使用，默认 4096；填写所选模型支持的正整数上限，应用最多接受 128000。          |
 
-首批使用 OpenAI 兼容 HTTP 协议：文本调用 Base URL 下的 `/chat/completions`，图片调用 `/images/generations`。文本模型可用不代表图片模型可用，其他专有协议需对应适配。接口依据见 [Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create) 与 [Images](https://developers.openai.com/api/reference/resources/images/methods/generate)。
+文本支持以下三种协议。Base URL 包含服务要求的版本前缀，应用自动追加相应路径；例如原生 OpenAI 使用 `https://api.openai.com/v1`，原生 Anthropic 使用 `https://api.anthropic.com/v1`，兼容网关使用网关提供的地址。
+
+| 文本协议           | 追加路径            | 请求与鉴权                                                                                                              |
+| ------------------ | ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Chat Completions   | `/chat/completions` | `messages`；设置密钥时使用 Bearer。                                                                                     |
+| Responses          | `/responses`        | `instructions`、`input`，显式 `store: false`；设置密钥时使用 Bearer。                                                   |
+| Anthropic Messages | `/messages`         | 顶层 `system`、用户 `messages`、必需的 `max_tokens`；设置密钥时使用 `x-api-key`，固定 `anthropic-version: 2023-06-01`。 |
+
+Anthropic 使用仍受支持的 `2023-06-01` 版本，便于兼容现有网关；不发送两个鉴权头，也不自动切换协议或降级重试。依据见 [Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)、[Responses](https://developers.openai.com/api/reference/resources/responses/methods/create)、[Anthropic Messages（2023-06-01）](https://platform.claude.com/docs/en/api/messages/create?version=2023-06-01) 与 [Anthropic 版本说明](https://platform.claude.com/docs/en/api/versioning)。
+
+图片继续独立使用 `/images/generations`，不受文本协议选择影响；本次未接入 Responses 的图片工具或 Anthropic 图片生成。接口依据见 [Images](https://developers.openai.com/api/reference/resources/images/methods/generate)。文本模型可用不代表图片模型可用。
 
 服务地址需使用 HTTPS，本机回环地址允许 HTTP。Docker 中的 `localhost` 指 API 容器自身；远端或其他容器的模型服务请使用该网络可访问的 HTTPS 地址。浏览器不持有模型密钥，也不直接请求模型服务。
 
 分别点击两项“实际生成验证”。验证会实际调用所配服务，可能产生费用；“配置已保存”与“生成验证通过”分开显示。先检查模型 ID、权限、额度及图片参数，再处理验证错误。模型执行中暂不能修改对应配置；排队期间配置变化的旧任务会停止并提示重新生成，不悄悄切换模型。
+
+升级前的文本配置自动保留为 Chat Completions，图片配置保留原接口。切换协议不会自动替换地址、模型或密钥；保存后需重新验证。任务记录保留实际使用的协议和配置版本，切换后仍可识别历史结果。
 
 更换服务地址的来源时，需重新输入新服务的密钥，或勾选清除已保存密钥；不会把旧服务的密钥自动带到另一个来源。切换到无需密钥的本机服务时可明确清除密钥。
 
@@ -41,6 +55,8 @@
 生成在后台 Worker 执行，可以查看排队、执行、成功、失败及结果待核对状态；“模型配置”的最近任务可找回已有记录。单次模型请求最多等待 5 分钟，图片地址下载另有 30 秒上限。
 
 创建任务的网络响应丢失时，继续获取同一请求的记录；明确重新生成才建立新请求。连接中断、服务端异常或执行中进程重启不会自动重发收费请求。结果待核对时先查看服务端记录，再决定是否显式重新生成。
+
+三个协议均检查实际正文及终止状态。Responses 从原始 `output` 文本块读取内容，不依赖 SDK 的 `output_text` 便捷属性；Anthropic 不把思考块作为正文。拒绝、截断、未完成、工具调用和无效结果不会成为成功候选。
 
 `REMOTE_WRITES_ENABLED` 控制微信远程写入，不控制用户明确发起的模型调用。因此微信写入关闭时仍能使用 AI 创作；模型配置页和生成操作会说明实际调用。
 

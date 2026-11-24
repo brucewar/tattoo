@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Empty, Form, Input, Pagination, Select, Spin, Tag } from 'antd';
+import {
+  Alert,
+  Button,
+  Checkbox,
+  Empty,
+  Form,
+  Input,
+  InputNumber,
+  Pagination,
+  Select,
+  Spin,
+  Tag,
+} from 'antd';
 import type {
   AiCapability,
   AiGenerationJob,
@@ -17,6 +29,7 @@ import {
   GenerationState,
   generationLabels,
   generationPending,
+  protocolLabels,
   useGenerationJob,
 } from '../components/ai/Generation';
 
@@ -68,6 +81,17 @@ function ModelEditor({
   const submitting = useRef(false);
   const { job, error: jobError, loading: jobLoading, refresh } = useGenerationJob(jobId);
   const image = capability === 'image';
+  const protocol =
+    Form.useWatch('protocol', form) ??
+    (image ? 'images-generations' : (config?.protocol ?? 'chat-completions'));
+  const anthropic = !image && protocol === 'anthropic-messages';
+  const endpoint = image
+    ? '/images/generations'
+    : protocol === 'responses'
+      ? '/responses'
+      : anthropic
+        ? '/messages'
+        : '/chat/completions';
   const title = image ? '图片模型' : '文本模型';
   const checking = Boolean(job && generationPending(job));
   const waitingForJob = Boolean(jobId && !job);
@@ -87,6 +111,9 @@ function ModelEditor({
         method: 'PUT',
         ...jsonRequest({
           ...values,
+          protocol: image ? 'images-generations' : values.protocol,
+          anthropicMaxTokens:
+            values.protocol === 'anthropic-messages' ? values.anthropicMaxTokens : 4096,
           apiKey: values.apiKey?.trim() || undefined,
         }),
       });
@@ -158,8 +185,14 @@ function ModelEditor({
           <h2>{title}</h2>
           <p className="secondary">{image ? '用于封面和正文插图。' : '用于文章生成和内容改写。'}</p>
         </div>
-        <Tag color={validation?.state === 'SUCCEEDED' ? 'success' : 'default'}>
-          {validation?.state === 'SUCCEEDED' ? '生成验证通过' : config ? '已保存' : '未配置'}
+        <Tag color={!changed && validation?.state === 'SUCCEEDED' ? 'success' : 'default'}>
+          {changed
+            ? '待保存'
+            : validation?.state === 'SUCCEEDED'
+              ? '生成验证通过'
+              : config
+                ? '已保存'
+                : '未配置'}
         </Tag>
       </div>
       {error && <Alert type="error" showIcon message={error} />}
@@ -170,6 +203,8 @@ function ModelEditor({
         layout="vertical"
         requiredMark={false}
         initialValues={{
+          protocol: image ? 'images-generations' : (config?.protocol ?? 'chat-completions'),
+          anthropicMaxTokens: config?.anthropicMaxTokens ?? 4096,
           baseUrl: config?.baseUrl ?? '',
           model: config?.model ?? '',
           apiKey: '',
@@ -185,14 +220,43 @@ function ModelEditor({
         onFinish={save}
         disabled={pending || checking || waitingForJob || unresolvedValidation}
       >
+        {!image && (
+          <Form.Item
+            label="接口协议"
+            name="protocol"
+            rules={[{ required: true, message: '请选择接口协议' }]}
+          >
+            <Select
+              getPopupContainer={(trigger) => trigger.parentElement ?? trigger}
+              options={[
+                { label: 'Chat Completions', value: 'chat-completions' },
+                { label: 'Responses', value: 'responses' },
+                { label: 'Anthropic Messages', value: 'anthropic-messages' },
+              ]}
+            />
+          </Form.Item>
+        )}
         <Form.Item
           label="服务地址"
           name="baseUrl"
           rules={[{ required: true, whitespace: true, message: '请输入服务地址' }]}
-          extra="填写服务商提供的 API 基础地址，例如 https://api.openai.com/v1；本机服务可使用 HTTP 环回地址。"
+          extra={`填写 API 基础地址（含版本前缀），例如 ${anthropic ? 'https://api.anthropic.com/v1' : 'https://api.openai.com/v1'}；系统会追加 ${endpoint}。本机服务可使用 HTTP 环回地址。`}
         >
           <Input placeholder="https://api.example.com/v1" autoComplete="off" maxLength={2000} />
         </Form.Item>
+        {anthropic && (
+          <Form.Item
+            label="最大输出 tokens"
+            name="anthropicMaxTokens"
+            rules={[
+              { required: true, message: '请输入最大输出 tokens' },
+              { type: 'integer', min: 1, max: 128000, message: '请输入 1 至 128000 的整数' },
+            ]}
+            extra="Messages 接口需要此上限；请填写所选模型支持的数值。达到上限的截断结果不会作为候选采用。"
+          >
+            <InputNumber min={1} max={128000} precision={0} />
+          </Form.Item>
+        )}
         <Form.Item
           label="模型名称"
           name="model"
@@ -429,7 +493,7 @@ export function Models({ onDirtyChange }: { onDirtyChange: (changed: boolean) =>
               <span>
                 <strong>{generationLabels[task.kind]}</strong>
                 <span className="secondary">
-                  {task.model} · {date(task.createdAt)}
+                  {task.model} · {protocolLabels[task.protocol]} · {date(task.createdAt)}
                 </span>
               </span>
               <GenerationState state={task.state} />
