@@ -4,12 +4,14 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 
-const { values } = parseArgs({ options: { image: { type: 'string' } } });
+const { values } = parseArgs({
+  options: { image: { type: 'string' }, anonymous: { type: 'boolean', default: false } },
+});
 const image = values.image;
 assert.match(
   image ?? '',
@@ -38,6 +40,7 @@ let origin;
 let failure;
 let composeStarted = false;
 let cleanupFailed = false;
+let anonymousDirectory;
 
 function redact(value) {
   let output = String(value);
@@ -98,6 +101,51 @@ function compose(args) {
     join(repository, 'compose.yaml'),
     ...args,
   ]);
+}
+
+async function prepareAnonymousDocker() {
+  const value = (name) =>
+    Object.entries(environment).find(([key]) => key.toUpperCase() === name)?.[1];
+  const contextName = await docker(['context', 'show']);
+  const context = JSON.parse(await docker(['context', 'inspect', contextName]))[0];
+  const explicitHost = !value('DOCKER_CONTEXT') && value('DOCKER_HOST');
+  const host = explicitHost || context?.Endpoints?.docker?.Host;
+  assert.ok(typeof host === 'string' && host.length, '无法解析当前 Docker 引擎地址');
+  if (!explicitHost && context?.TLSMaterial?.docker?.length && !value('DOCKER_CERT_PATH'))
+    throw new Error('当前 Docker context 依赖专用 TLS 资料；匿名验收需使用显式 Docker 连接环境');
+  const before = JSON.parse(
+    await docker([
+      'info',
+      '--format',
+      '{"id":{{json .ID}},"plugins":{{json .ClientInfo.Plugins}}}',
+    ]),
+  );
+  const plugin = before.plugins?.find((item) => item.Name === 'compose');
+  assert.ok(plugin?.Path && isAbsolute(plugin.Path), '无法定位当前可信 Docker Compose 插件');
+  const pluginDirectory = await realpath(dirname(plugin.Path));
+  temporaryRoot = await realpath(tmpdir());
+  anonymousDirectory = await mkdtemp(join(temporaryRoot, 'tattoo-ghcr-anonymous-'));
+  await writeFile(
+    join(anonymousDirectory, 'config.json'),
+    // An empty registry entry prevents Docker from auto-discovering a native credential store.
+    JSON.stringify({ auths: { 'ghcr.io': {} }, cliPluginsExtraDirs: [pluginDirectory] }),
+    { mode: 0o600, flag: 'wx' },
+  );
+  // Keep the current engine, but do not inherit registry credentials or credential helpers.
+  for (const name of Object.keys(environment))
+    if (
+      ['DOCKER_CONTEXT', 'DOCKER_CONFIG', 'DOCKER_AUTH_CONFIG', 'DOCKER_HOST'].includes(
+        name.toUpperCase(),
+      )
+    )
+      delete environment[name];
+  environment.DOCKER_HOST = host;
+  environment.DOCKER_CONFIG = anonymousDirectory;
+  assert.equal(
+    await docker(['info', '--format', '{{.ID}}']),
+    before.id,
+    '匿名配置不得切换 Docker 引擎',
+  );
 }
 
 async function unusedPort() {
@@ -172,6 +220,7 @@ async function login() {
 }
 
 try {
+  if (values.anonymous) await prepareAnonymousDocker();
   assert.match(
     await docker(['info', '--format', '{{.OSType}}/{{.Architecture}}']),
     /^linux\/(?:x86_64|amd64)$/,
@@ -249,8 +298,10 @@ try {
     assert.equal(configuration.services[name].image, image);
     assert.equal(configuration.services[name].build, undefined);
   }
-  // Keep the application digest fixed; PostgreSQL is the official separate image.
-  await compose(['pull', 'postgres']);
+  // PostgreSQL is a fixture; only the application must be pulled afresh from GHCR.
+  // Reuse the official local tag when present, without reusing any database volume.
+  if (!(await docker(['image', 'ls', '--quiet', 'postgres:16-alpine'])))
+    await compose(['pull', 'postgres']);
   composeStarted = true;
   await compose(['up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '180']);
   const raw = await compose(['ps', '--format', 'json']);
@@ -338,7 +389,7 @@ try {
     assetHash,
   );
   console.info(
-    'PASS: 已从 GHCR 拉取准确 digest；纯拉取三服务、登录、页面/API、图片和重建后文章/素材持久化通过',
+    `PASS: 已${values.anonymous ? '匿名' : ''}从 GHCR 拉取准确 digest；纯拉取三服务、登录、页面/API、图片和重建后文章/素材持久化通过`,
   );
 } catch (error) {
   failure = error;
@@ -355,6 +406,11 @@ try {
     assert.equal(dirname(directory), temporaryRoot);
     assert.ok(basename(directory).startsWith('tattoo-ghcr-probe-'));
     await rm(directory, { recursive: true });
+  }
+  if (anonymousDirectory && !cleanupFailed) {
+    assert.equal(dirname(anonymousDirectory), temporaryRoot);
+    assert.ok(basename(anonymousDirectory).startsWith('tattoo-ghcr-anonymous-'));
+    await rm(anonymousDirectory, { recursive: true });
   }
   if (cleanupFailed)
     console.error('隔离资源清理失败，保留配置供排查：' + project + ' / ' + directory);

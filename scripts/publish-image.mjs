@@ -88,6 +88,12 @@ async function main() {
           throw new Error('Unable to confirm current main commit');
         update = current.object.sha === plan.sha;
       } else if (plan.alias === 'latest') {
+        // Another version may have been tagged while this image was building.
+        execFileSync('git', ['fetch', 'origin', '--tags'], {
+          stdio: 'ignore',
+          windowsHide: true,
+          timeout: 30000,
+        });
         const tags = execFileSync('git', ['tag', '--merged', 'origin/main', '--list', 'v*'], {
           encoding: 'utf8',
           windowsHide: true,

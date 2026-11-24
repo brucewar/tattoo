@@ -27,12 +27,12 @@ docker run --rm --user "$(id -u):$(id -g)" --mount "type=bind,source=$(pwd),targ
 ```powershell
 New-Item -ItemType Directory -Path tattoo
 Set-Location tattoo
-Invoke-WebRequest https://raw.githubusercontent.com/brucewar/tattoo/v0.1.0-rc.1/compose.yaml -OutFile compose.yaml
 docker pull ghcr.io/brucewar/tattoo:0.1.0-rc.1
+docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/config" ghcr.io/brucewar/tattoo:0.1.0-rc.1 node --input-type=module -e "import { writeFile } from 'node:fs/promises'; const response = await fetch('https://raw.githubusercontent.com/brucewar/tattoo/v0.1.0-rc.1/compose.yaml'); if (!response.ok) throw new Error('Compose download failed: ' + response.status); await writeFile('/config/compose.yaml', await response.text(), { flag: 'wx' });"
 docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/config" ghcr.io/brucewar/tattoo:0.1.0-rc.1 node scripts/configure.mjs --output /config/.env
 ```
 
-Docker Desktop 使用 Linux 容器模式。上述两种方式均不需要在宿主安装 Node.js。
+Docker Desktop 使用 Linux 容器模式。Windows 示例通过应用镜像下载 Compose，避免依赖主机 Node.js 或 PowerShell 的证书链环境，下载仍正常校验证书；文件已存在时拒绝覆盖。也可直接从[固定版本的 Compose](https://raw.githubusercontent.com/brucewar/tattoo/v0.1.0-rc.1/compose.yaml) 保存文件到部署目录。上述两种方式均不需要在宿主安装 Node.js。
 
 ### 修改配置并启动
 
@@ -90,7 +90,7 @@ TATTOO_IMAGE=ghcr.io/brucewar/tattoo@sha256:<发布摘要中的完整摘要值>
 
 普通个人部署使用固定版本或 digest；`edge` 是持续更新的开发版本。本项目首版只发布已验证的 `linux/amd64`。
 
-维护者首次发布后，需要在 [Tattoo 镜像包页面](https://github.com/users/brucewar/packages/container/package/tattoo) 将包设为 Public，普通使用者才能匿名拉取。GitHub 的源码公开与包可见性分别设置；入口为 Package settings → Danger Zone → Change visibility → Public，按页面输入包名确认，公开后不能改回私有。自动发布使用仓库令牌，使用者拉取公开镜像无需登录。[GitHub 官方说明](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)
+维护者首次发布后应在 GitHub 账号的 Packages 列表确认 Tattoo 镜像包为 Public，普通使用者才能匿名拉取。若包为 Private，入口为 Package settings → Danger Zone → Change visibility → Public，按页面输入包名确认，公开后不能改回私有。源码公开与包可见性分别设置，自动发布使用仓库令牌；公开镜像的使用者无需 Docker 登录。[GitHub 官方说明](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)
 
 ## 备份恢复与开发
 
