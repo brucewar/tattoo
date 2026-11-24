@@ -1,0 +1,9 @@
+{
+  "assets": {
+    "demo-cover.png": {
+      "purpose": "演示文章封面，供真实界面截图使用",
+      "origin": "Built-in image_gen",
+      "prompt": "Use case: product-mockup.\nAsset type: a single editorial cover illustration used as sample media inside real screenshots of Tattoo, a self-hosted writing workspace.\nPrimary request: a refined, calm cover for an article about building a lightweight writing system and keeping everyday inspiration.\nScene: a beautifully arranged writing desk seen from an elevated three-quarter angle. One open blank ivory notebook with sculptural, gently curved paper pages, a closed deep forest-green notebook underneath, one slender graphite pencil, one small warm ochre bookmark. Quiet morning sunlight and a soft leaf shadow across a warm off-white surface. A tiny sage paper slip can add a restrained geometric accent.\nStyle: realistic tactile still-life photography, sophisticated editorial art direction, matte paper, natural grain, controlled soft shadows. Restrained and inviting, with one clear focal point.\nComposition: wide horizontal 16:9, subject centered with generous breathing room and safe crop margins, notebook and paper the main subject. No human hands.\nPalette: ivory, warm white, deep forest green #35634e, muted sage, one tiny ochre accent.\nConstraints: absolutely no text, lettering, writing, logos, branding, watermark, computer UI, robots, AI sparkles or neon effects. The notebook pages are completely blank. No decorative clutter."
+    }
+  }
+}

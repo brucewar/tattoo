@@ -1,14 +1,33 @@
-# 从 GHCR 拉取镜像部署 Tattoo
+# 部署 Tattoo
 
-首个候选版镜像为 `ghcr.io/brucewar/tattoo:0.1.0-rc.1`，平台为 `linux/amd64`。Docker 主机需要支持 Linux 容器的 Docker Engine 与 Docker Compose，不需要安装 Node.js、npm 或构建前端。当前真实模型和微信公众号验收仍需在自己的配置中完成。
+[文档首页](README.md) · [开始使用](GETTING-STARTED.md) · [运行维护](OPERATIONS.md) · [常见问题](FAQ.md)
 
-## 首次部署
+使用 Docker Compose 拉取镜像即可运行 Tattoo，宿主机不需要 Node.js、npm 或源码。以下步骤适用于支持 Linux 容器的 Docker 主机，包括 NAS；首次配置通过应用镜像生成。
 
-在自己选择的部署目录操作。部署使用一个应用镜像，API 和 Worker 分容器共用它；PostgreSQL 使用官方镜像，数据库与图片放在命名卷中。
+## 部署前确认
 
-### Linux / NAS
+| 项目           | 当前支持情况                                                                                                         |
+| -------------- | -------------------------------------------------------------------------------------------------------------------- |
+| 发布版本       | `0.1.0-rc.1`，候选版                                                                                                 |
+| 应用镜像       | `ghcr.io/brucewar/tattoo:0.1.0-rc.1`，可匿名拉取                                                                     |
+| CPU / 容器平台 | 已发布并验证 `linux/amd64`（x86-64）；当前没有 ARM 镜像                                                              |
+| 容器环境       | Docker Engine 与 Docker Compose v2，需支持下文的 `--wait`、`--wait-timeout` 参数；Docker Desktop 使用 Linux 容器模式 |
+| Web 端口       | 默认 `8080`，可修改                                                                                                  |
+| 持久数据       | PostgreSQL 数据库和图片素材分别保存在 Docker 命名卷中                                                                |
+| 运行服务       | `api`、`worker`、`postgres` 三个容器；API 与 Worker 共用一个 Tattoo 镜像                                             |
 
-在 Docker 主机的终端执行：
+不限定 NAS 品牌或型号；请先确认 CPU 架构和容器环境。当前版本的部署与本地自动验收已完成，真实模型、Tavily 和微信接口仍需使用自己的配置验证。
+
+选择一个长期保留的部署目录，下面的 `compose.yaml` 和 `.env` 都保存在其中。部署时需能访问 GHCR、Docker Hub 和 GitHub 原始文件地址。
+
+## 1. 下载 Compose 并生成配置
+
+选择与你的终端对应的命令。两种方式都下载固定发布版本的文件，并生成随机数据库密码、管理员初始密码和加密主密钥。已有部署直接查看[升级与固定镜像](#升级与固定镜像)，无需重新生成配置。
+
+<details open>
+<summary><strong>Linux / NAS 终端</strong></summary>
+
+在 Docker 主机上执行：
 
 ```bash
 mkdir tattoo
@@ -18,9 +37,12 @@ docker pull ghcr.io/brucewar/tattoo:0.1.0-rc.1
 docker run --rm --user "$(id -u):$(id -g)" --mount "type=bind,source=$(pwd),target=/config" ghcr.io/brucewar/tattoo:0.1.0-rc.1 node scripts/configure.mjs --output /config/.env
 ```
 
-配置生成器用随机值创建数据库密码、管理员初始密码和加密主密钥，文件已存在时拒绝覆盖。通过当前用户身份写入部署目录，避免产生当前用户无法读取的配置文件。若通过远程 Docker context 操作其他主机，绑定目录需要在 Docker 主机上可见；也可先在管理电脑用仓库的 `node scripts/configure.mjs` 生成配置，再使用部署目录中的文件。
+配置以当前用户身份写入，避免生成只有其他用户可读的文件。若通过远程 Docker context 操作主机，绑定目录必须在 Docker 主机上可见；最直接的方式是在主机终端完成这一步。
 
-### Windows / Docker Desktop
+</details>
+
+<details>
+<summary><strong>Windows / Docker Desktop（PowerShell）</strong></summary>
 
 在 PowerShell 执行：
 
@@ -32,23 +54,37 @@ docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/config"
 docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/config" ghcr.io/brucewar/tattoo:0.1.0-rc.1 node scripts/configure.mjs --output /config/.env
 ```
 
-Docker Desktop 使用 Linux 容器模式。Windows 示例通过应用镜像下载 Compose，避免依赖主机 Node.js 或 PowerShell 的证书链环境，下载仍正常校验证书；文件已存在时拒绝覆盖。也可直接从[固定版本的 Compose](https://raw.githubusercontent.com/brucewar/tattoo/v0.1.0-rc.1/compose.yaml) 保存文件到部署目录。上述两种方式均不需要在宿主安装 Node.js。
+该方式通过应用镜像内的 Node.js 下载 Compose，正常校验 HTTPS 证书，不依赖宿主 Node.js 或 PowerShell 的证书链环境。也可从[固定版本的 Compose](https://raw.githubusercontent.com/brucewar/tattoo/v0.1.0-rc.1/compose.yaml) 手动保存文件，再执行最后一条配置命令。
 
-### 修改配置并启动
+</details>
 
-用本机编辑器打开 `.env`，核对以下设置，不把配置文件内容发到聊天或公开日志：
+配置生成器拒绝覆盖已有 `.env`。请保管该文件，并为 `APP_ENCRYPTION_KEY` 留一份独立副本；它用于解密保存的公众号、模型及搜索凭证。
 
-| 设置                               | 用途                                                                                         |
-| ---------------------------------- | -------------------------------------------------------------------------------------------- |
-| `TATTOO_VERSION=0.1.0-rc.1`        | 固定使用该候选版本。                                                                         |
-| `APP_ORIGIN=http://localhost:8080` | 必须改成浏览器实际访问的来源；局域网可用 `http://主机地址:8080`，域名访问填完整 HTTPS 来源。 |
-| `WEB_PORT=8080`                    | 对外页面端口，与访问来源协调。                                                               |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD`   | 首次管理员；密码已随机生成，已有管理员不会被启动配置覆盖。                                   |
-| `APP_ENCRYPTION_KEY`               | 主密钥；独立保管，升级时保持不变。                                                           |
-| `POSTGRES_PASSWORD`                | 数据库密码；已有数据库继续使用原值。                                                         |
-| `REMOTE_WRITES_ENABLED=false`      | 首次保持关闭，明确测试微信草稿前再开启。                                                     |
+## 2. 设置浏览器访问地址
 
-然后执行：
+用本机编辑器打开 `.env`，优先核对 `APP_ORIGIN` 和 `WEB_PORT`：
+
+- 只在 Docker 主机上访问：默认 `http://localhost:8080`。
+- 从局域网电脑或手机访问：例如 `http://192.168.1.20:8080`，将示例 IP 换成 Docker 主机的实际地址。
+- 使用域名与反向代理：例如 `https://tattoo.example.com`，配置见[局域网与 HTTPS](OPERATIONS.md#局域网与-https)。
+
+`APP_ORIGIN` 必须与浏览器实际使用的协议、主机和端口一致，不含路径。改变 Web 端口时一并更新访问地址。
+
+| 配置                             | 首次部署如何处理                             |
+| -------------------------------- | -------------------------------------------- |
+| `TATTOO_VERSION=0.1.0-rc.1`      | 保持固定候选版本                             |
+| `APP_ORIGIN`                     | 改成上面确定的浏览器访问来源                 |
+| `WEB_PORT=8080`                  | 未被占用时保留；占用时换一个端口             |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | 用于首次登录；密码已随机生成，可在启动前修改 |
+| `APP_ENCRYPTION_KEY`             | 保留生成值，独立备份；升级时不更换           |
+| `POSTGRES_PASSWORD`              | 保留生成值；已有数据库不随意更换密码         |
+| `REMOTE_WRITES_ENABLED=false`    | 暂时保持关闭；不影响手写或明确发起的 AI 创作 |
+
+管理员只在空实例首次初始化。已有管理员不会被 `.env` 中的新密码覆盖，忘记密码见[管理员密码恢复](OPERATIONS.md#管理员密码恢复)。不要公开 `.env` 或把它提交到仓库。
+
+## 3. 启动并登录
+
+继续在部署目录执行：
 
 ```bash
 docker compose config --quiet
@@ -57,13 +93,17 @@ docker compose up -d --no-build --remove-orphans --wait --wait-timeout 180
 docker compose ps
 ```
 
-默认访问 `http://localhost:8080`，使用 `.env` 中的管理员配置登录。在“模型配置”分别保存文本和图片模型后，可在“内容 → 主题创作”输入主题生成图文；在“公众号账号”输入微信 AppID/AppSecret。生成内容不会自动投递微信。
+打开配置的 `APP_ORIGIN`，使用 `.env` 中的管理员邮箱和密码登录。部署在 NAS 上时，浏览器应访问 NAS 的地址，而不是访问浏览器所在电脑的 `localhost`。
 
-只有 API 映射宿主 Web 端口，数据库和 Worker 不对外开放。首次启动自动执行版本化迁移；迁移失败不启动 API，Worker 等 API 健康后再启动。数据随命名卷保留，普通更新不要执行 `down -v`。
+启动时会自动执行数据库迁移；迁移失败则 API 不启动，Worker 等 API 健康后再启动。只有 API 发布 Web 端口，Worker 和数据库不直接对外开放。遇到问题先查看[启动与登录排查](FAQ.md#页面打不开或登录失败怎么排查)。
+
+登录后按照[开始使用](GETTING-STARTED.md)创建第一篇文章。模型 API Key、Tavily Key、微信 AppID/AppSecret 都在自己的页面配置，不填入部署命令。生成文章不会自动投递微信。
 
 ## 升级与固定镜像
 
-先完成[停机一致备份](OPERATIONS.md#停机一致备份)，保留配置、主密钥和原镜像。取得新版本对应的 Compose 文件，保持原目录、项目名和数据卷，修改 `.env` 的 `TATTOO_VERSION` 后执行；如果设置了优先级更高的 `TATTOO_IMAGE`，同时更新其完整引用，或明确清除它后改用版本标签：
+升级前先完成[停机一致备份](OPERATIONS.md#停机一致备份)，保留原配置、主密钥、匹配的 Compose 文件和应用镜像。取得新版本对应的 Compose，保持原项目名和持久卷，再修改 `.env` 的 `TATTOO_VERSION`。
+
+若设置了完整镜像引用 `TATTOO_IMAGE`，它的优先级高于 `TATTOO_VERSION`，应同步更新，或明确清除后使用版本标签。
 
 ```bash
 docker compose pull
@@ -71,35 +111,29 @@ docker compose up -d --no-build --remove-orphans --wait --wait-timeout 180
 docker compose ps
 ```
 
-从旧四服务部署升级时，`--remove-orphans` 移除同项目旧 Web 容器，将原端口交给 API，不删除数据库与素材卷。已有部署不要重新执行配置生成器。发布版只拉取镜像，不需要 `--build`。
+从旧四服务部署升级时，`--remove-orphans` 移除同项目旧 Web 容器，将原端口交给 API；数据库和素材卷保留。完整步骤及回滚见[升级与回滚](OPERATIONS.md#升级与回滚)。普通更新不执行 `down -v`。
 
-需要精确固定发布产物时，取发布 workflow 摘要中的 digest，在 `.env` 设置完整引用：
+若需按 digest 固定镜像，可把发布 workflow 摘要中的完整引用填入 `.env`：
 
 ```dotenv
 TATTOO_IMAGE=ghcr.io/brucewar/tattoo@sha256:<发布摘要中的完整摘要值>
 ```
 
-`TATTOO_IMAGE` 同时覆盖 API 与 Worker 的镜像，并优先于 `TATTOO_VERSION`。升级前记录实际应用镜像 ID；备份不包含镜像。回滚若涉及不兼容迁移，需要按匹配版本备份恢复，不能只改旧标签。
+该配置同时用于 API 和 Worker。备份不包含镜像，恢复还需保留[匹配的镜像](OPERATIONS.md#保留匹配的镜像)；数据库已经迁移后，只改回旧标签不一定能回滚。
 
 ## 自动构建与版本
 
-- 主分支通过 CI 后自动发布 `edge` 和完整提交哈希标签 `sha-<40位提交哈希>`。
-- 推送 `vX.Y.Z` 或 `vX.Y.Z-预发布号` 标签时，验证对应提交后发布去掉 `v` 的镜像标签。
-- `0.1.0-rc.1` 等预发布不会更新 `latest`；正式版本发布成功才更新 `latest`。
-- 版本/提交标签已有产物时不覆盖其他提交；发布重试复用已核对的相同提交镜像。移动别名只在拉回镜像并完成部署验收后更新。
+| 标签                    | 用途                                           |
+| ----------------------- | ---------------------------------------------- |
+| `0.1.0-rc.1` 等固定版本 | 个人部署优先使用，明确选择升级时机             |
+| `sha-<40位提交哈希>`    | 定位通过 CI 的具体提交                         |
+| `edge`                  | 主分支持续更新的开发版本                       |
+| `latest`                | 正式版本发布成功才更新；当前候选版不提供该标签 |
 
-普通个人部署使用固定版本或 digest；`edge` 是持续更新的开发版本。本项目首版只发布已验证的 `linux/amd64`。
+主分支通过 CI 后自动发布 `edge` 与提交标签。推送 `vX.Y.Z` 或预发布标签时，验证对应提交后发布去掉 `v` 的版本；已有版本/提交产物不会被其他提交覆盖，重试复用核对过的同一提交镜像。移动标签在镜像拉取及部署验收通过后更新。
 
-维护者首次发布后应在 GitHub 账号的 Packages 列表确认 Tattoo 镜像包为 Public，普通使用者才能匿名拉取。若包为 Private，入口为 Package settings → Danger Zone → Change visibility → Public，按页面输入包名确认，公开后不能改回私有。源码公开与包可见性分别设置，自动发布使用仓库令牌；公开镜像的使用者无需 Docker 登录。[GitHub 官方说明](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)
+## 备份恢复与源码构建
 
-## 备份恢复与开发
+运行 Tattoo 的 Docker 主机无需 Node.js。现有备份、恢复工具需要在管理电脑上准备 Node.js 22 与匹配版本源码，通过 Docker CLI 操作实例；工具的获取方法和完整命令见[运行维护](OPERATIONS.md#准备备份恢复管理工具)。
 
-运行 Tattoo 不要求宿主 Node.js；现有备份恢复管理工具使用管理电脑上的 Node.js 22 和匹配版本源码，通过 Docker CLI 操作主机，见[运维说明](OPERATIONS.md)。独立下载 Compose 部署时，给管理工具指定该文件，例如：
-
-```bash
-node scripts/backup.mjs --output ./data/backups/before-upgrade --project tattoo --env-file /path/to/deployment/.env --compose-file /path/to/deployment/compose.yaml
-```
-
-路径为示例，请替换成自己的部署路径。多个 `--compose-file` 按输入顺序合并；一旦显式指定就不自动添加仓库默认文件。主密钥和匹配镜像仍需单独保管，恢复只接受真正空的目标。
-
-源码构建使用仓库 `compose.build.yaml` 覆盖文件，见[开发说明](DEVELOPMENT.md)，与普通镜像部署分开。
+默认 `compose.yaml` 只拉取镜像，不含 `build`。开发者从源码构建时使用 `compose.build.yaml` 覆盖文件，见[开发说明](DEVELOPMENT.md)。

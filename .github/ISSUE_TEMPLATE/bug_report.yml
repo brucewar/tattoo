@@ -1,19 +1,47 @@
 name: 缺陷报告
-description: 报告可复现的问题（请勿提交任何凭证）
+description: 报告部署、创作或投递中可复现的问题
 body:
+  - type: markdown
+    attributes:
+      value: |
+        请先查看[常见问题](https://github.com/brucewar/tattoo/blob/main/docs/FAQ.md)。
+        不要附上 .env、API Key、AppSecret、Cookie、备份或私人文章。安全漏洞请使用[私下报告渠道](https://github.com/brucewar/tattoo/blob/main/SECURITY.md)。
+  - type: input
+    id: version
+    attributes:
+      label: Tattoo 版本
+      description: 镜像标签、digest 或源码提交；使用 edge 时请提供具体镜像或提交。
+      placeholder: ghcr.io/brucewar/tattoo:0.1.0-rc.1
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 部署与访问环境
+      description: 操作系统或 NAS 系统、CPU 架构、Docker / Compose 版本、浏览器；是否通过反向代理访问。
+      placeholder: Linux x86-64，Docker …，Compose …，Chrome …，局域网访问
+    validations:
+      required: true
   - type: textarea
     id: behavior
     attributes:
-      label: 问题与预期行为
+      label: 发生了什么？原本期望什么？
+      description: 描述具体入口、操作和结果。可以附上使用演示数据的截图。
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
       label: 复现步骤
+      placeholder: |
+        1. 打开……
+        2. 点击……
+        3. 出现……
     validations:
       required: true
   - type: textarea
-    id: environment
+    id: logs
     attributes:
-      label: 版本、架构与脱敏后的错误
+      label: 相关错误或日志（可选）
+      description: 仅贴相关片段，先去掉凭证、Cookie、地址中的令牌和私人内容。
+      render: text
