@@ -31,6 +31,7 @@ const applicationEnvironment = [
   'PORT',
   'WECHAT_API_BASE',
   'ALLOW_MOCK_WECHAT',
+  'SOURCES_TEST_ORIGIN',
 ];
 const isolatedEnvironment = { ...process.env };
 for (const key of Object.keys(isolatedEnvironment)) {
@@ -46,7 +47,8 @@ const adminEmail = 'p5-recovery@example.com';
 const adminPassword = randomBytes(24).toString('base64url');
 const accountSecret = 'p5-only-fake-' + randomBytes(24).toString('hex');
 const aiSecret = 'p6-only-fake-' + randomBytes(24).toString('hex');
-const secrets = [key, wrongKey, adminPassword, accountSecret, aiSecret];
+const searchSecret = 'p9-only-fake-' + randomBytes(24).toString('hex');
+const secrets = [key, wrongKey, adminPassword, accountSecret, aiSecret, searchSecret];
 const cleanupErrors = [];
 let temporaryRoot;
 let directory;
@@ -292,7 +294,7 @@ function restoreCommand(backupDirectory, envFile = target.envFile, allowFailure 
   );
 }
 
-async function checkRestored(fixture) {
+async function checkRestored(fixture, expectedSessions = 0) {
   const result = await containerNode(
     target,
     `
@@ -305,13 +307,46 @@ async function checkRestored(fixture) {
       const db = new PrismaClient();
       try {
         assert.equal(process.env.REMOTE_WRITES_ENABLED, 'false');
-        assert.equal(await db.session.count(), 0);
+        assert.equal(await db.session.count(), ${expectedSessions});
         const account = await db.account.findUniqueOrThrow({ where: { id: fixture.accountId } });
         assert.equal(new SecretBox(process.env.APP_ENCRYPTION_KEY).decrypt(account.secretEncrypted), fixture.secret);
         const model = await db.aiModel.findUniqueOrThrow({ where: { capability: 'text' } });
         assert.equal(new SecretBox(process.env.APP_ENCRYPTION_KEY).decrypt(model.apiKeyEncrypted), fixture.aiSecret);
         assert.equal(model.protocol, 'anthropic-messages');
         assert.equal(model.anthropicMaxTokens, 8192);
+        const searchConfig = await db.sourceSearchConfig.findUniqueOrThrow({ where: { id: 'default' } });
+        assert.notEqual(searchConfig.apiKeyEncrypted, fixture.searchSecret);
+        assert.equal(new SecretBox(process.env.APP_ENCRYPTION_KEY).decrypt(searchConfig.apiKeyEncrypted), fixture.searchSecret);
+        assert.equal(searchConfig.baseUrl, 'https://api.tavily.com');
+        assert.equal(searchConfig.version, fixture.searchVersion);
+        const feed = await db.sourceFeed.findUniqueOrThrow({ where: { id: fixture.feed.id } });
+        assert.equal(feed.url, fixture.feed.url);
+        assert.equal(feed.title, fixture.feed.title);
+        assert.equal(feed.lastFetchedAt.toISOString(), fixture.material.fetchedAt);
+        assert.equal(feed.lastError, null);
+        const material = await db.source.findUniqueOrThrow({ where: { id: fixture.material.id } });
+        for (const field of ['url', 'resolvedUrl', 'title', 'text', 'contentKind', 'origin', 'contentHash', 'feedId', 'feedUrl'])
+          assert.equal(material[field], fixture.material[field]);
+        assert.equal(material.publishedAt.toISOString(), fixture.material.publishedAt);
+        assert.equal(material.fetchedAt.toISOString(), fixture.material.fetchedAt);
+        assert.equal(createHash('sha256').update(material.text).digest('hex'), material.contentHash);
+        const sourceJobs = await db.sourceJob.findMany({ orderBy: { id: 'asc' } });
+        assert.equal(sourceJobs.length, fixture.sourceJobs.length);
+        for (const expected of fixture.sourceJobs) {
+          const actual = sourceJobs.find((row) => row.id === expected.id);
+          assert.ok(actual);
+          assert.equal(actual.kind, 'SEARCH');
+          assert.equal(actual.configVersion, fixture.searchVersion);
+          if (['QUEUED', 'RUNNING'].includes(expected.state)) {
+            assert.equal(actual.state, 'UNCERTAIN');
+            assert.equal(actual.executionId, null);
+            assert.equal(actual.heartbeatAt, null);
+            assert.match(actual.error, /恢复/);
+          } else {
+            assert.equal(actual.state, expected.state);
+            assert.deepEqual(actual.result, expected.result);
+          }
+        }
         const generationJobs = await db.generationJob.findMany({ where: { modelId: model.id } });
         assert.equal(generationJobs.length, fixture.generationJobs.length);
         for (const expected of fixture.generationJobs) {
@@ -319,6 +354,8 @@ async function checkRestored(fixture) {
           assert.ok(actual);
           assert.equal(actual.model, 'recovery-text-fixture');
           assert.equal(actual.protocol, 'anthropic-messages');
+          assert.equal(actual.sourceText, fixture.referenceText);
+          assert.deepEqual(actual.sourceReferences, fixture.sourceReferences);
           if (['QUEUED', 'RUNNING'].includes(expected.state)) {
             assert.equal(actual.state, 'UNCERTAIN');
             assert.equal(actual.executionId, null);
@@ -359,7 +396,7 @@ async function checkRestored(fixture) {
             assert.equal(actual.events.filter((event) => event.actor === 'restore').length, 0);
           }
         }
-        console.log(JSON.stringify({ article: article.id, revisions: article.revisions.map(({ id, title, version }) => ({ id, title, version })), asset: { id: asset.id, sha256: createHash('sha256').update(bytes).digest('hex') }, mappings, deliveries: deliveries.map(({ id, state, stage, remoteId, executionId, events, attempts }) => ({ id, state, stage, remoteId, executionId, events, attempts })), generationJobs: generationJobs.map(({ id, state, model }) => ({ id, state, model })) }));
+        console.log(JSON.stringify({ article: article.id, revisions: article.revisions.map(({ id, title, version }) => ({ id, title, version })), asset: { id: asset.id, sha256: createHash('sha256').update(bytes).digest('hex') }, mappings, deliveries: deliveries.map(({ id, state, stage, remoteId, executionId, events, attempts }) => ({ id, state, stage, remoteId, executionId, events, attempts })), generationJobs: generationJobs.map(({ id, state, model, sourceText, sourceReferences }) => ({ id, state, model, sourceText, sourceReferences })), material: { id: material.id, text: material.text, hash: material.contentHash, feedId: material.feedId }, feed: { id: feed.id, url: feed.url, title: feed.title }, searchConfig: { version: searchConfig.version, baseUrl: searchConfig.baseUrl }, sourceJobs: sourceJobs.map(({ id, state, result }) => ({ id, state, result })) }));
       } finally { await db.$disconnect(); }
     `,
   );
@@ -467,8 +504,8 @@ try {
     });
     articles.push((await response.json()).data);
   }
-  // AI is independent of the WeChat write switch. Stop this owned Worker before
-  // seeding old generation jobs so this recovery exercise never calls a real model.
+  // Model/search calls are independent of the WeChat write switch. Stop this
+  // owned Worker before seeding tasks so no real model or search service is used.
   await compose(source, ['stop', '--timeout', '45', 'worker']);
   await http(source, '/ai/models/text', {
     method: 'PUT',
@@ -481,10 +518,87 @@ try {
       apiKey: aiSecret,
     },
   });
+  const searchConfig = (
+    await (
+      await http(source, '/sources/search-config', {
+        method: 'PUT',
+        cookie: sourceCookie,
+        json: { baseUrl: 'https://api.tavily.com', apiKey: searchSecret },
+      })
+    ).json()
+  ).data;
+  const feed = (
+    await (
+      await http(source, '/sources/feeds', {
+        method: 'POST',
+        status: 201,
+        cookie: sourceCookie,
+        json: { url: 'https://example.com/p9-recovery/feed.xml', title: 'P9 恢复资料订阅' },
+      })
+    ).json()
+  ).data;
+  const materialText = '恢复前采集的公开资料正文。\n\n来源和完整文字应在恢复与重建后保持一致。';
+  const material = {
+    id: randomUUID(),
+    url: 'https://example.com/p9-recovery/article',
+    resolvedUrl: 'https://example.com/p9-recovery/final',
+    title: 'P9 恢复资料正文',
+    text: materialText,
+    contentHash: createHash('sha256').update(materialText).digest('hex'),
+    contentKind: 'article',
+    origin: 'rss',
+    feedId: feed.id,
+    feedUrl: feed.url,
+    publishedAt: '2026-11-23T00:00:00.000Z',
+    fetchedAt: new Date().toISOString(),
+  };
+  const sourceReferences = [
+    {
+      id: material.id,
+      title: material.title,
+      url: material.url,
+      contentHash: material.contentHash,
+      fetchedAt: material.fetchedAt,
+    },
+  ];
+  const referenceText =
+    '参考资料：' + material.title + '\n来源：' + material.url + '\n\n' + material.text;
+  const sourceJobs = ['QUEUED', 'RUNNING', 'UNCERTAIN', 'FAILED', 'SUCCEEDED'].map((state) => ({
+    id: randomUUID(),
+    state,
+    result:
+      state === 'SUCCEEDED'
+        ? {
+            sourceIds: [material.id],
+            items: [
+              {
+                title: '恢复前的搜索候选',
+                url: 'https://example.com/p9-recovery/candidate',
+                snippet: '这是一份恢复前的搜索摘要。',
+              },
+            ],
+            created: 0,
+            updated: 0,
+          }
+        : null,
+  }));
   const generationJobs = ['QUEUED', 'RUNNING', 'UNCERTAIN', 'FAILED', 'SUCCEEDED'].map((state) => ({
     id: randomUUID(),
     state,
-    result: state === 'SUCCEEDED' ? { type: 'text', text: '恢复前的生成结果' } : null,
+    result:
+      state === 'SUCCEEDED'
+        ? {
+            type: 'article',
+            title: '恢复前的生成结果',
+            digest: '资料快照恢复验证',
+            document: {
+              type: 'doc',
+              content: [
+                { type: 'paragraph', content: [{ type: 'text', text: '恢复前的生成正文。' }] },
+              ],
+            },
+          }
+        : null,
   }));
   const deliveries = ['QUEUED', 'RUNNING', 'UNCERTAIN', 'FAILED', 'SUCCEEDED'].map(
     (state, index) => ({
@@ -499,6 +613,13 @@ try {
     accountId: account.id,
     secret: accountSecret,
     aiSecret,
+    searchSecret,
+    searchVersion: searchConfig.version,
+    feed: { id: feed.id, url: feed.url, title: feed.title },
+    material,
+    sourceReferences,
+    referenceText,
+    sourceJobs,
     generationJobs,
     articleId: articles[0].id,
     assetId: asset.id,
@@ -513,18 +634,39 @@ try {
   await execNode(
     source,
     `
-      import { randomUUID } from 'node:crypto';
+      import { createHash, randomUUID } from 'node:crypto';
       import { PrismaClient } from '@prisma/client';
       import { RENDER_VERSION } from './apps/server/dist/platforms/wechat/renderer.js';
       const fixture = ${JSON.stringify(fixture)};
       const db = new PrismaClient();
       try {
+        await db.sourceFeed.update({ where: { id: fixture.feed.id }, data: { lastFetchedAt: new Date(fixture.material.fetchedAt), lastError: null } });
+        await db.source.create({ data: {
+          ...fixture.material,
+          urlHash: createHash('sha256').update(fixture.material.url).digest('hex'),
+          publishedAt: new Date(fixture.material.publishedAt),
+          fetchedAt: new Date(fixture.material.fetchedAt),
+        } });
+        const searchConfig = await db.sourceSearchConfig.findUniqueOrThrow({ where: { id: 'default' } });
+        if (searchConfig.version !== fixture.searchVersion) throw new Error('search config fixture changed');
+        for (const row of fixture.sourceJobs) {
+          await db.sourceJob.create({ data: {
+            id: row.id, requestKey: randomUUID(), kind: 'SEARCH', state: row.state,
+            query: '恢复验收，仅准备旧搜索任务，不向服务发出请求', origin: 'search',
+            configVersion: searchConfig.version, inputHash: 'p9-recovery-fixture',
+            executionId: row.state === 'RUNNING' ? randomUUID() : null,
+            heartbeatAt: row.state === 'RUNNING' ? new Date() : null,
+            completedAt: ['UNCERTAIN', 'FAILED', 'SUCCEEDED'].includes(row.state) ? new Date() : null,
+            ...(row.result ? { result: row.result } : {}),
+          } });
+        }
         const model = await db.aiModel.findUniqueOrThrow({ where: { capability: 'text' } });
         for (const row of fixture.generationJobs) {
           await db.generationJob.create({ data: {
-            id: row.id, requestKey: randomUUID(), kind: 'TEST_TEXT', capability: 'text',
+            id: row.id, requestKey: randomUUID(), kind: 'ARTICLE', capability: 'text',
               modelId: model.id, model: model.model, protocol: model.protocol, configVersion: model.version,
             inputHash: 'recovery-fixture', prompt: '恢复验收，仅准备旧任务，不发出模型请求',
+            sourceText: fixture.referenceText, sourceReferences: fixture.sourceReferences,
             state: row.state,
             executionId: row.state === 'RUNNING' ? randomUUID() : null,
             heartbeatAt: row.state === 'RUNNING' ? new Date() : null,
@@ -555,7 +697,7 @@ try {
     `,
   );
   console.info(
-    'PASS: 真实 HTTP 创建账号、图片、6 份修订和模型配置；停止 Worker 后准备五种投递与生成状态，无真实模型调用',
+    'PASS: 真实 HTTP 创建账号、图片、6 份修订、模型与搜索配置和订阅；停止 Worker 后准备资料、快照及五种投递/生成/搜索状态，无真实服务调用',
   );
 
   const backupDirectory = join(directory, 'backup');
@@ -618,7 +760,7 @@ try {
   assert.notEqual((await restoreCommand(backupDirectory, target.envFile, true)).code, 0);
   assert.deepEqual(await checkRestored(fixture), restored);
   console.info(
-    'PASS: 空实例恢复后公众号及模型密钥可解密、会话撤销、图文与历史完整，旧投递和生成任务冻结；拒绝覆盖非空目标',
+    'PASS: 空实例恢复后公众号、模型及搜索密钥可解密，会话撤销，图文/资料/订阅/快照完整，旧投递、生成和搜索任务冻结；拒绝覆盖非空目标',
   );
 
   await compose(target, ['up', '-d', '--wait', '--wait-timeout', '180', 'api', 'web']);
@@ -636,6 +778,36 @@ try {
   assert.equal(restoredModels.text.hasApiKey, true);
   assert.equal(restoredModels.text.protocol, 'anthropic-messages');
   assert.equal(restoredModels.text.anthropicMaxTokens, 8192);
+  const restoredSearchText = await (
+    await http(target, '/sources/search-config', { cookie: targetCookie })
+  ).text();
+  assert.ok(!restoredSearchText.includes(searchSecret));
+  const restoredSearch = JSON.parse(restoredSearchText).data;
+  assert.equal(restoredSearch.baseUrl, 'https://api.tavily.com');
+  assert.equal(restoredSearch.hasApiKey, true);
+  assert.equal(restoredSearch.version, fixture.searchVersion);
+  assert.equal(Object.hasOwn(restoredSearch, 'apiKeyEncrypted'), false);
+  assert.equal(Object.hasOwn(restoredSearch, 'apiKey'), false);
+  const restoredMaterial = (
+    await (await http(target, '/sources/' + fixture.material.id, { cookie: targetCookie })).json()
+  ).data;
+  assert.equal(restoredMaterial.text, fixture.material.text);
+  assert.equal(restoredMaterial.contentHash, fixture.material.contentHash);
+  assert.equal(restoredMaterial.feedId, fixture.feed.id);
+  assert.equal(restoredMaterial.feedUrl, fixture.feed.url);
+  const restoredFeeds = (
+    await (await http(target, '/sources/feeds', { cookie: targetCookie })).json()
+  ).data;
+  assert.ok(
+    restoredFeeds.items.some((row) => row.id === fixture.feed.id && row.url === fixture.feed.url),
+  );
+  const restoredJob = (
+    await (
+      await http(target, '/ai/jobs/' + fixture.generationJobs.at(-1).id, { cookie: targetCookie })
+    ).json()
+  ).data;
+  assert.equal(restoredJob.sourceText, fixture.referenceText);
+  assert.deepEqual(restoredJob.sourceReferences, fixture.sourceReferences);
   const current = (
     await (await http(target, '/articles/' + fixture.articleId, { cookie: targetCookie })).json()
   ).data;
@@ -693,7 +865,10 @@ try {
     ),
     originalAsset,
   );
-  console.info('PASS: 旧会话失效、新登录与图片历史可读，恢复后投递被禁用，容器重建后数据仍保留');
+  assert.deepEqual(await checkRestored(fixture, 1), restored);
+  console.info(
+    'PASS: 旧会话失效，新登录可读图片、资料、订阅和快照；恢复后投递被禁用，容器重建后全部数据仍保留',
+  );
 } catch (error) {
   failure = error;
 } finally {

@@ -34,6 +34,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       WECHAT_API_BASE: z.string().url().default('https://api.weixin.qq.com'),
       ALLOW_MOCK_WECHAT: flag.default('false'),
       REMOTE_WRITES_ENABLED: flag.default('false'),
+      SOURCES_TEST_ORIGIN: z.string().url().optional(),
     })
     .safeParse(env);
   if (!parsed.success) {
@@ -42,6 +43,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     );
   }
   const config = parsed.data;
+  if (config.SOURCES_TEST_ORIGIN) {
+    const testOrigin = new URL(config.SOURCES_TEST_ORIGIN);
+    if (
+      config.NODE_ENV !== 'test' ||
+      testOrigin.protocol !== 'http:' ||
+      !['127.0.0.1', 'localhost', '[::1]'].includes(testOrigin.hostname) ||
+      testOrigin.origin !== config.SOURCES_TEST_ORIGIN ||
+      testOrigin.username ||
+      testOrigin.password
+    )
+      throw new Error('SOURCES_TEST_ORIGIN 只允许测试环境中的精确 HTTP 环回来源');
+  }
   const origin = new URL(config.APP_ORIGIN);
   if (
     !['http:', 'https:'].includes(origin.protocol) ||

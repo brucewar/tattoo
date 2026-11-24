@@ -7,6 +7,7 @@ import { AssetsModule } from './assets/assets.module';
 import { PublishingModule } from './publishing/publishing.module';
 import { ContentModule } from './content/content.module';
 import { AiModule } from './ai/ai.module';
+import { SourcesModule } from './sources/sources.module';
 import { CsrfGuard } from './csrf.guard';
 import { HealthController } from './health.controller';
 
@@ -19,6 +20,7 @@ import { HealthController } from './health.controller';
     PublishingModule,
     ContentModule,
     AiModule,
+    SourcesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: CsrfGuard }],
   controllers: [HealthController],

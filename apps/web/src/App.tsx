@@ -7,14 +7,18 @@ import { Accounts } from './views/Accounts';
 import { Records } from './views/Records';
 import { Content } from './views/Content';
 import { Models } from './views/Models';
+import { Sources } from './views/Sources';
+
+type Section = 'content' | 'accounts' | 'records' | 'models' | 'sources';
 
 export function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [bootError, setBootError] = useState('');
   const [expired, setExpired] = useState(false);
-  const [section, setSection] = useState<'content' | 'accounts' | 'records' | 'models'>('content');
+  const [section, setSection] = useState<Section>('content');
   const [contentDirty, setContentDirty] = useState(false);
   const [modelsDirty, setModelsDirty] = useState(false);
+  const [sourcesDirty, setSourcesDirty] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState('');
   const loadSession = useCallback(async () => {
@@ -43,11 +47,13 @@ export function App() {
   }, []);
   async function logout() {
     if (
-      (contentDirty || modelsDirty) &&
+      (contentDirty || modelsDirty || sourcesDirty) &&
       !window.confirm(
-        modelsDirty
-          ? '模型配置有未保存修改。确定退出并放弃修改吗？'
-          : '文章有未保存修改或正在处理的操作。确定退出并放弃本地编辑吗？',
+        sourcesDirty
+          ? '搜索配置有未保存修改。确定退出并放弃修改吗？'
+          : modelsDirty
+            ? '模型配置有未保存修改。确定退出并放弃修改吗？'
+            : '文章有未保存修改或正在处理的操作。确定退出并放弃本地编辑吗？',
       )
     )
       return;
@@ -66,19 +72,22 @@ export function App() {
       setLoggingOut(false);
     }
   }
-  function navigate(next: 'content' | 'accounts' | 'records' | 'models') {
+  function navigate(next: Section) {
     if (next === section) return;
     if (
-      (contentDirty || modelsDirty) &&
+      (contentDirty || modelsDirty || sourcesDirty) &&
       !window.confirm(
-        modelsDirty
-          ? '模型配置有未保存修改。确定离开并放弃修改吗？'
-          : '文章有未保存修改或正在处理的操作。确定离开并放弃本地编辑吗？',
+        sourcesDirty
+          ? '搜索配置有未保存修改。确定离开并放弃修改吗？'
+          : modelsDirty
+            ? '模型配置有未保存修改。确定离开并放弃修改吗？'
+            : '文章有未保存修改或正在处理的操作。确定离开并放弃本地编辑吗？',
       )
     )
       return;
     setContentDirty(false);
     setModelsDirty(false);
+    setSourcesDirty(false);
     setSection(next);
   }
   if (user === undefined)
@@ -140,6 +149,14 @@ export function App() {
             </button>
             <button
               type="button"
+              aria-current={section === 'sources' ? 'page' : undefined}
+              className={section === 'sources' ? 'active' : ''}
+              onClick={() => navigate('sources')}
+            >
+              资料
+            </button>
+            <button
+              type="button"
               aria-current={section === 'models' ? 'page' : undefined}
               className={section === 'models' ? 'active' : ''}
               onClick={() => navigate('models')}
@@ -179,6 +196,8 @@ export function App() {
             />
           ) : section === 'models' ? (
             <Models onDirtyChange={setModelsDirty} />
+          ) : section === 'sources' ? (
+            <Sources onDirtyChange={setSourcesDirty} />
           ) : (
             <Records remoteWritesEnabled={Boolean(user.remoteWritesEnabled)} />
           )}

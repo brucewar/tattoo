@@ -68,7 +68,19 @@ export function createAiMock(png) {
       protocol,
       task,
       model: input.model,
-      prompt: typeof input.prompt === 'string' ? input.prompt : '',
+      prompt:
+        capability === 'image'
+          ? typeof input.prompt === 'string'
+            ? input.prompt
+            : ''
+          : protocol === 'responses'
+            ? typeof input.input === 'string'
+              ? input.input
+              : ''
+            : (input.messages ?? [])
+                .filter((message) => message.role === 'user')
+                .map((message) => (typeof message.content === 'string' ? message.content : ''))
+                .join('\n'),
       size: input.size ?? null,
       responseFormat: input.response_format ?? null,
       maxTokens: input.max_tokens ?? null,

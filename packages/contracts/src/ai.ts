@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Asset, DocumentNode } from './index';
+import type { SourceReferenceSnapshot } from './sources';
 
 export const aiCapabilities = ['text', 'image'] as const;
 export type AiCapability = (typeof aiCapabilities)[number];
@@ -55,10 +56,23 @@ export const aiGenerationInput = z
     kind: z.enum(aiGenerationKinds),
     prompt: safeText(6000).default(''),
     sourceText: safeText(80000).optional(),
+    sourceIds: z.array(z.string().uuid()).max(5).optional(),
     articleId: z.string().uuid().optional(),
   })
   .strict()
   .superRefine((value, context) => {
+    if (value.sourceIds?.length && value.kind !== 'ARTICLE')
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['sourceIds'],
+        message: '保存的资料用于文章生成，请在 AI 写文章中选择',
+      });
+    if (value.sourceIds && new Set(value.sourceIds).size !== value.sourceIds.length)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['sourceIds'],
+        message: '请勿重复选择同一份资料',
+      });
     if (!value.kind.startsWith('TEST_') && !value.prompt.trim())
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -109,6 +123,7 @@ export type AiGenerationJob = {
   state: AiGenerationState;
   prompt: string;
   sourceText: string;
+  sourceReferences: SourceReferenceSnapshot[];
   articleId: string | null;
   result: AiGenerationResult | null;
   error: string | null;

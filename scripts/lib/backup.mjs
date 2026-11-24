@@ -398,6 +398,8 @@ const accountCheck = `
     }
     const models = await db.query('SELECT "apiKeyEncrypted" FROM "AiModel"');
     for (const row of models.rows) if (row.apiKeyEncrypted) box.decrypt(row.apiKeyEncrypted);
+    const searches = await db.query('SELECT "apiKeyEncrypted" FROM "SourceSearchConfig"');
+    for (const row of searches.rows) if (row.apiKeyEncrypted) box.decrypt(row.apiKeyEncrypted);
     console.log('ACCOUNT_KEYS_OK');
   } finally { await db.end(); }
 `;
@@ -502,6 +504,10 @@ export const restoredTasksSql = `
     error='备份恢复后已暂停旧生成任务；原实例可能已调用模型，请核对结果后显式重新生成',
     "executionId"=NULL, "heartbeatAt"=NULL, "completedAt"=CURRENT_TIMESTAMP, "updatedAt"=CURRENT_TIMESTAMP
     WHERE state IN ('QUEUED', 'RUNNING');
+  UPDATE "SourceJob" SET state='UNCERTAIN',
+    error='备份恢复后已暂停旧资料任务；搜索服务可能已计费，请核对后显式重新获取',
+    "executionId"=NULL, "heartbeatAt"=NULL, "completedAt"=CURRENT_TIMESTAMP, "updatedAt"=CURRENT_TIMESTAMP
+      WHERE state IN ('QUEUED', 'RUNNING');
   COMMIT;
 `;
 

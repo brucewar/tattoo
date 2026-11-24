@@ -8,6 +8,19 @@ const valid = {
 };
 
 describe('部署配置', () => {
+  it('资料抓取测试例外只允许 test 环境的精确 HTTP 环回来源', () => {
+    expect(
+      loadConfig({ ...valid, NODE_ENV: 'test', SOURCES_TEST_ORIGIN: 'http://127.0.0.1:8099' })
+        .SOURCES_TEST_ORIGIN,
+    ).toBe('http://127.0.0.1:8099');
+    for (const settings of [
+      { NODE_ENV: 'production', SOURCES_TEST_ORIGIN: 'http://127.0.0.1:8099' },
+      { NODE_ENV: 'test', SOURCES_TEST_ORIGIN: 'http://169.254.169.254' },
+      { NODE_ENV: 'test', SOURCES_TEST_ORIGIN: 'http://127.0.0.1:8099/path' },
+      { NODE_ENV: 'test', SOURCES_TEST_ORIGIN: 'http://user:secret@127.0.0.1:8099' },
+    ])
+      expect(() => loadConfig({ ...valid, ...settings })).toThrow('SOURCES_TEST_ORIGIN');
+  });
   it('相对素材路径固定在仓库根目录，不依赖 workspace 启动目录', () => {
     expect(loadConfig({ ...valid, STORAGE_PATH: './data/assets' }).STORAGE_PATH).toBe(
       resolve(__dirname, '../../data/assets'),

@@ -145,6 +145,23 @@ export function GenerationProgress({ job }: { job: AiGenerationJob }) {
       {job.state === 'UNCERTAIN' && (
         <p className="form-note">未收到可用结果。再次生成会发起新的模型调用，可能产生额外费用。</p>
       )}
+      {job.sourceReferences?.length > 0 && (
+        <section className="source-job-references" aria-label="本次使用的资料">
+          <h4>本次使用的资料</h4>
+          {job.sourceReferences.map((source) => (
+            <p key={source.id}>
+              <a href={source.url} target="_blank" rel="noopener noreferrer">
+                {source.title || source.url}
+              </a>
+              <span className="secondary">
+                {' '}
+                · 获取于 {date(source.fetchedAt)} · 内容指纹 {source.contentHash.slice(0, 12)}
+              </span>
+            </p>
+          ))}
+          <p className="form-note">记录的是生成时的资料快照，之后重新采集不会改变本次输入。</p>
+        </section>
+      )}
     </div>
   );
 }

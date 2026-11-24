@@ -181,6 +181,7 @@ export class AiService {
       state: job.state,
       prompt: job.prompt,
       sourceText: job.sourceText,
+      sourceReferences: job.sourceReferences as AiGenerationJob['sourceReferences'],
       articleId: job.articleId,
       result: job.result as AiGenerationResult | null,
       error: job.error,
@@ -193,13 +194,15 @@ export class AiService {
 
   async createJob(value: unknown): Promise<AiGenerationJob> {
     const input = parse(aiGenerationInput, value);
-    const sourceText = input.sourceText ?? '';
+    const providedSourceText = input.sourceText ?? '';
+    const sourceIds = input.sourceIds ?? [];
     const inputHash = createHash('sha256')
       .update(
         JSON.stringify({
           kind: input.kind,
           prompt: input.prompt,
-          sourceText,
+          sourceText: providedSourceText,
+          ...(sourceIds.length ? { sourceIds } : {}),
           articleId: input.articleId ?? null,
         }),
       )
@@ -212,6 +215,36 @@ export class AiService {
         throw new ConflictException('同一请求标识已用于其他生成内容，请重新发起');
       return this.publicJob(previous);
     }
+    const selectedSources = sourceIds.length
+      ? await this.database.source.findMany({ where: { id: { in: sourceIds } } })
+      : [];
+    if (selectedSources.length !== sourceIds.length)
+      throw new NotFoundException('选择的资料不存在，请刷新资料列表后重新选择');
+    const orderedSources = sourceIds.map((id) =>
+      selectedSources.find((source) => source.id === id)!,
+    );
+    if (orderedSources.some((source) => !source.text.trim()))
+      throw new BadRequestException('选择的资料没有文字，请先提取正文或选择其他资料');
+    const sourceReferences = orderedSources.map((source) => ({
+      id: source.id,
+      title: source.title,
+      url: source.url,
+      contentHash: source.contentHash,
+      fetchedAt: source.fetchedAt.toISOString(),
+    }));
+    const sourceText = [
+      providedSourceText,
+      ...orderedSources.map(
+        (source, index) =>
+          `参考资料 ${index + 1}\n标题：${source.title}\n来源：${source.url}\n获取时间：${source.fetchedAt.toISOString()}\n资料类型：${source.contentKind === 'feed' ? 'RSS 文字（可能为摘要）' : '网页正文'}\n正文：\n${source.text}`,
+      ),
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    if (sourceText.length > 80000 || /[\u0000\uD800-\uDFFF]/u.test(sourceText))
+      throw new BadRequestException(
+        '参考资料总长度超过 80000 字符或包含无效文字，请减少资料后重新生成',
+      );
     if (
       input.articleId &&
       !(await this.database.article.findUnique({
@@ -238,6 +271,7 @@ export class AiService {
           configVersion: model.version,
           prompt: input.prompt,
           sourceText,
+          sourceReferences: sourceReferences as Prisma.InputJsonValue,
           articleId: input.articleId ?? null,
           inputHash,
         },

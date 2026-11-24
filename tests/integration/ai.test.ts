@@ -298,7 +298,7 @@ describe('AI 配置与生成 / 真实 API、PostgreSQL 和隔离模型接口', (
     expect(list.image?.model).toBe('test-image-model');
   });
 
-  it('升级旧数据库保留密钥与任务，并回填旧文本、图片配置和历史任务的协议', async () => {
+  it('升级旧数据库保留密钥与任务，回填协议并为历史任务初始化空资料快照', async () => {
     const migrationSchema = `tattoo_ai_migration_${randomUUID().replaceAll('-', '')}`;
     const migrations = resolve('apps/server/prisma/migrations');
     const textId = randomUUID();
@@ -339,6 +339,15 @@ describe('AI 配置与生成 / 真实 API、PostgreSQL 和隔离模型接口', (
       await connection.query(
         await readFile(join(migrations, '20261124000000_ai_protocols', 'migration.sql'), 'utf8'),
       );
+      await connection.query(
+        await readFile(join(migrations, '20261124010000_sources', 'migration.sql'), 'utf8'),
+      );
+      const references = await connection.query('SELECT "sourceReferences" FROM "GenerationJob"');
+      expect(references.rows).toEqual([{ sourceReferences: [] }, { sourceReferences: [] }]);
+      for (const table of ['Source', 'SourceFeed', 'SourceSearchConfig', 'SourceJob']) {
+        const rows = await connection.query(`SELECT COUNT(*) AS count FROM "${table}"`);
+        expect(Number(rows.rows[0].count)).toBe(0);
+      }
       const configurations = await connection.query(
         'SELECT "capability", "protocol", "anthropicMaxTokens", "version", "apiKeyEncrypted" FROM "AiModel" ORDER BY "capability"::text',
       );
@@ -729,4 +738,139 @@ describe('AI 配置与生成 / 真实 API、PostgreSQL 和隔离模型接口', (
     expect((await getJob(queued.id)).state).toBe('SUCCEEDED');
     expect(model.calls.text).toBe(before + 2);
   }, 25000);
+  it('选择的资料正文和来源固化到生成任务，刷新资料后同一请求仍返回原始快照', async () => {
+    await configure('text');
+    const url = `https://example.com/reference/${randomUUID()}`;
+    const original = '已保存资料中的原始可靠正文。';
+    const source = await database.source.create({
+      data: {
+        url,
+        urlHash: createHash('sha256').update(url).digest('hex'),
+        resolvedUrl: url,
+        title: '原始参考资料',
+        text: original,
+        contentHash: createHash('sha256').update(original).digest('hex'),
+        contentKind: 'article',
+        origin: 'url',
+      },
+    });
+    const input = {
+      requestKey: randomUUID(),
+      kind: 'ARTICLE',
+      prompt: '基于选定资料写文章',
+      sourceText: '另外提供的手填参考。',
+      sourceIds: [source.id],
+    };
+    const first = await data<AiGenerationJob>(await request('/ai/jobs', 'POST', input));
+    expect(first.sourceText).toContain(original);
+    expect(first.sourceText).toContain(input.sourceText);
+    expect(first.sourceText).toContain(url);
+    expect(first.sourceReferences).toEqual([
+      {
+        id: source.id,
+        title: source.title,
+        url,
+        contentHash: source.contentHash,
+        fetchedAt: source.fetchedAt.toISOString(),
+      },
+    ]);
+    await database.source.update({
+      where: { id: source.id },
+      data: {
+        title: '后来更新的参考资料',
+        text: '后来的内容不能改写原始请求。',
+        contentHash: 'updated-content-hash',
+        fetchedAt: new Date(),
+      },
+    });
+    const repeated = await data<AiGenerationJob>(await request('/ai/jobs', 'POST', input));
+    expect(repeated.id).toBe(first.id);
+    expect(repeated.sourceText).toBe(first.sourceText);
+    expect(repeated.sourceReferences).toEqual(first.sourceReferences);
+    await processNext();
+    expect((await getJob(first.id)).state).toBe('SUCCEEDED');
+    expect(model.requests.at(-1)?.prompt).toContain(original);
+    expect(model.requests.at(-1)?.prompt).toContain(url);
+    expect(model.requests.at(-1)?.prompt).not.toContain('后来的内容');
+    const next = await data<AiGenerationJob>(
+      await request('/ai/jobs', 'POST', { ...input, requestKey: randomUUID() }),
+    );
+    expect(next.sourceText).toContain('后来的内容');
+    expect(next.sourceReferences[0]?.title).toBe('后来更新的参考资料');
+    expect((await request('/ai/jobs', 'POST', { ...input, sourceIds: [] })).status).toBe(409);
+  });
+
+  it('资料缺失、空文字、重复选择、不支持的用途或总参考超限均在模型调用前拒绝', async () => {
+    await configure('text');
+    const beforeCalls = model.calls.text;
+    const beforeJobs = await database.generationJob.count();
+    const sources = [];
+    for (const [index, text] of ['', '甲'.repeat(42000), '乙'.repeat(42000)].entries()) {
+      const url = `https://example.com/reference-limits/${randomUUID()}`;
+      sources.push(
+        await database.source.create({
+          data: {
+            url,
+            urlHash: createHash('sha256').update(url).digest('hex'),
+            resolvedUrl: url,
+            title: `参考资料 ${index}`,
+            text,
+            contentHash: createHash('sha256').update(text).digest('hex'),
+            contentKind: index ? 'article' : 'feed',
+            origin: index ? 'url' : 'rss',
+          },
+        }),
+      );
+    }
+    const input = { kind: 'ARTICLE', prompt: '引用资料生成' };
+    expect(
+      (
+        await request('/ai/jobs', 'POST', {
+          ...input,
+          requestKey: randomUUID(),
+          sourceIds: [randomUUID()],
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await request('/ai/jobs', 'POST', {
+          ...input,
+          requestKey: randomUUID(),
+          sourceIds: [sources[0]!.id],
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request('/ai/jobs', 'POST', {
+          ...input,
+          requestKey: randomUUID(),
+          sourceIds: [sources[1]!.id, sources[1]!.id],
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request('/ai/jobs', 'POST', {
+          ...input,
+          requestKey: randomUUID(),
+          sourceIds: [sources[1]!.id, sources[2]!.id],
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request('/ai/jobs', 'POST', {
+          ...input,
+          requestKey: randomUUID(),
+          kind: 'REWRITE',
+          sourceText: '仅改写这段原文',
+          sourceIds: [sources[1]!.id],
+        })
+      ).status,
+    ).toBe(400);
+    expect(model.calls.text).toBe(beforeCalls);
+    expect(await database.generationJob.count()).toBe(beforeJobs);
+  });
 });

@@ -46,6 +46,20 @@ enum GenerationState {
   UNCERTAIN
 }
 
+enum SourceJobKind {
+  URL
+  FEED
+  SEARCH
+}
+
+enum SourceJobState {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  UNCERTAIN
+}
+
 model AiModel {
   id                  String          @id @default(uuid()) @db.Uuid
   capability          AiCapability    @unique
@@ -75,6 +89,7 @@ model GenerationJob {
   inputHash      String
   prompt         String
   sourceText     String          @default("")
+  sourceReferences Json          @default("[]")
   articleId      String?         @db.Uuid
   state          GenerationState @default(QUEUED)
   result         Json?
@@ -89,6 +104,71 @@ model GenerationJob {
   @@index([state, createdAt])
   @@index([modelId, configVersion, kind, createdAt])
   @@index([articleId, createdAt])
+}
+
+model SourceFeed {
+  id            String   @id @default(uuid()) @db.Uuid
+  url           String
+  urlHash       String   @unique
+  title         String   @default("")
+  lastFetchedAt DateTime?
+  lastError     String?
+  sources       Source[]
+  createdAt     DateTime @default(now())
+}
+
+model Source {
+  id           String      @id @default(uuid()) @db.Uuid
+  url          String
+  urlHash      String      @unique
+  resolvedUrl  String      @default("")
+  title        String
+  text         String
+  contentHash  String
+  contentKind  String
+  origin       String
+  feedId       String?     @db.Uuid
+  feed         SourceFeed? @relation(fields: [feedId], references: [id], onDelete: SetNull)
+  feedUrl      String?
+  publishedAt  DateTime?
+  fetchedAt    DateTime    @default(now())
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([updatedAt, id])
+  @@index([feedId])
+}
+
+model SourceSearchConfig {
+  id              String   @id @default("default")
+  baseUrl         String
+  apiKeyEncrypted String
+  version         Int      @default(1)
+  updatedAt       DateTime @updatedAt
+}
+
+model SourceJob {
+  id            String         @id @default(uuid()) @db.Uuid
+  requestKey    String         @unique @db.Uuid
+  kind          SourceJobKind
+  state         SourceJobState @default(QUEUED)
+  url           String         @default("")
+  feedId        String?        @db.Uuid
+  query         String         @default("")
+  origin        String         @default("url")
+  configVersion Int?
+  inputHash     String
+  result        Json?
+  error         String?
+  executionId   String?        @db.Uuid
+  heartbeatAt   DateTime?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([state, createdAt])
+  @@index([feedId, state])
 }
 
 model User {

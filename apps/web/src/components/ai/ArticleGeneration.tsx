@@ -13,6 +13,7 @@ import type {
 import { aiGenerationInput } from '@tattoo/contracts';
 import { api, ApiError, errorMessage, jsonRequest, requestId } from '../../api';
 import { fingerprint } from '../article/model';
+import { SourcePicker } from '../sources/SourcePicker';
 import {
   GenerationProgress,
   GenerationResult,
@@ -101,6 +102,7 @@ export function ArticleGeneration({
   const [kind, setKind] = useState<CreationKind | null>(null);
   const [prompt, setPrompt] = useState('');
   const [references, setReferences] = useState('');
+  const [sourceIds, setSourceIds] = useState<string[]>([]);
   const [scope, setScope] = useState<RewriteScope>('document');
   const [selectedText, setSelectedText] = useState('');
   const [jobScope, setJobScope] = useState<RewriteScope>('document');
@@ -201,6 +203,7 @@ export function ArticleGeneration({
     setScope(held?.context.scope ?? (selected.trim() ? 'selection' : 'document'));
     setPrompt(held?.input.prompt ?? (value === 'ARTICLE' ? draft.title : ''));
     setReferences(value === 'ARTICLE' ? (held?.input.sourceText ?? '') : '');
+    setSourceIds(value === 'ARTICLE' ? (held?.input.sourceIds ?? []) : []);
     setError('');
     setAdopted(false);
     setModels(null);
@@ -253,6 +256,7 @@ export function ArticleGeneration({
           kind,
           prompt: prompt.trim(),
           ...(sourceText ? { sourceText } : {}),
+          ...(kind === 'ARTICLE' && sourceIds.length ? { sourceIds } : {}),
           ...(articleId ? { articleId } : {}),
         },
         context: {
@@ -487,6 +491,9 @@ export function ArticleGeneration({
             }
           />
         </div>
+        {kind === 'ARTICLE' && (
+          <SourcePicker value={sourceIds} onChange={setSourceIds} disabled={active} />
+        )}
         {kind === 'ARTICLE' && (
           <div className="ai-input-field">
             <label htmlFor="ai-generation-references">参考资料（可选）</label>

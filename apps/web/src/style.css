@@ -1071,3 +1071,217 @@ code {
     animation: none !important;
   }
 }
+
+/* P9: source collection and article reference selection. */
+.source-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+.source-panel {
+  min-width: 0;
+  padding: 28px;
+  margin-bottom: 24px;
+}
+.source-panel h2 {
+  font-size: 1.125rem;
+  margin-bottom: 14px;
+}
+.source-panel h3 {
+  font-size: 1rem;
+}
+.source-panel > .ant-alert,
+.source-panel > .ant-form,
+.source-panel > .ant-input-search {
+  margin-bottom: 18px;
+}
+.source-heading,
+.source-actions,
+.source-feed-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.source-heading {
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.source-heading h2,
+.source-heading h3 {
+  margin-bottom: 0;
+}
+.source-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  margin-top: 14px;
+}
+.source-query-label {
+  display: block;
+  margin-bottom: 8px;
+}
+.source-panel > textarea {
+  margin-bottom: 16px;
+}
+.source-feed-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 16px;
+}
+.source-feed-form .ant-form-item {
+  min-width: 0;
+}
+.source-feed-form > .ant-btn {
+  margin-bottom: 24px;
+}
+.source-feed-row {
+  align-items: flex-start;
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+}
+.source-feed-row > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.source-feed-row strong,
+.source-link {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.source-feed-row p {
+  font-size: 0.8125rem;
+  margin: 8px 0 0;
+}
+.source-feed-row .source-actions {
+  margin-top: 0;
+}
+.source-result {
+  padding: 20px 0;
+  border-top: 1px solid var(--line);
+}
+.source-result h3 {
+  overflow-wrap: anywhere;
+}
+.source-detail-title {
+  overflow-wrap: anywhere;
+}
+.source-snippet,
+.source-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.9;
+}
+.source-snippet {
+  font-size: 0.875rem;
+  margin-top: 10px;
+}
+.source-body {
+  max-height: 52vh;
+  overflow-y: auto;
+  margin: 24px 0;
+}
+.source-saved-row,
+.source-task-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  width: 100%;
+  padding: 20px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.source-saved-row:hover,
+.source-task-row:hover {
+  background: #f7faf8;
+}
+.source-saved-row > span:first-child,
+.source-task-row > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.source-saved-row strong,
+.source-saved-row .secondary,
+.source-task-row strong,
+.source-task-row .secondary {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.source-saved-row .secondary,
+.source-task-row .secondary {
+  margin-top: 6px;
+  font-size: 0.75rem;
+}
+.source-picker {
+  margin: 20px 0;
+  padding: 18px 0;
+  border-block: 1px solid var(--line);
+}
+.source-picker h3 {
+  font-size: 0.9375rem;
+}
+.source-picker-row {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.source-picker-meta {
+  margin: 8px 0 0 24px;
+  font-size: 0.75rem;
+}
+.source-picker .ant-pagination,
+.source-picker > .ant-btn {
+  margin-top: 14px;
+}
+.source-picker .ant-checkbox-wrapper {
+  align-items: flex-start;
+}
+.source-job-references {
+  border-top: 1px solid var(--line);
+  margin-top: 18px;
+  padding-top: 16px;
+}
+.source-job-references h4 {
+  margin: 0 0 10px;
+}
+.source-job-references p {
+  overflow-wrap: anywhere;
+  font-size: 0.8125rem;
+}
+@media (max-width: 1050px) {
+  .source-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .source-feed-form {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    align-items: start;
+  }
+}
+@media (max-width: 760px) {
+  .source-panel {
+    padding: 22px 20px;
+  }
+  .source-feed-row {
+    flex-direction: column;
+  }
+  .source-saved-row,
+  .source-task-row {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .source-saved-row > span:first-child,
+  .source-task-row > span:first-child {
+    flex-basis: 100%;
+  }
+  .source-picker-meta .ant-tag,
+  .source-saved-row .ant-tag {
+    white-space: normal;
+  }
+}

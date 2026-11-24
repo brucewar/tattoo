@@ -11,10 +11,12 @@ import { RuntimeModule } from './runtime.module';
 import { PublishingModule, PublishingService, WORKER_LOCK } from './publishing/publishing.module';
 import { AiModule } from './ai/ai.module';
 import { AiService } from './ai/service';
+import { SourcesModule } from './sources/sources.module';
+import { SourcesService } from './sources/service';
 
 const heartbeat = join(tmpdir(), 'tattoo-worker-health');
 
-@Module({ imports: [RuntimeModule, PublishingModule, AiModule] })
+@Module({ imports: [RuntimeModule, PublishingModule, AiModule, SourcesModule] })
 class WorkerModule {}
 
 async function main() {
@@ -52,6 +54,7 @@ async function main() {
     });
     const publishing = application.get(PublishingService);
     const ai = application.get(AiService);
+    const sources = application.get(SourcesService);
     const assertActive = async () => {
       if (stopping || connectionError || !ownsLock) throw new Error('Worker 执行权已停止');
       await client.query('SELECT 1');
@@ -59,6 +62,7 @@ async function main() {
     };
     await publishing.recover();
     await ai.recover();
+    await sources.recover();
     await writeFile(heartbeat, String(Date.now()), { mode: 0o600 });
     let refreshing = false;
     timer = setInterval(() => {
@@ -82,7 +86,9 @@ async function main() {
       const processed = await publishing.processNext(assertActive);
       await assertActive();
       const generated = await ai.processNext(assertActive);
-      if (!processed && !generated) await setTimeout(1000);
+      await assertActive();
+      const collected = await sources.processNext(assertActive);
+      if (!processed && !generated && !collected) await setTimeout(1000);
     }
     if (connectionError) throw new Error('执行权连接中断');
   } finally {
