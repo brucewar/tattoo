@@ -10,8 +10,7 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
-const version = process.env.TATTOO_VERSION || 'local';
-assert.match(version, /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/, '无效的验证镜像标签');
+let imageRef;
 const identifier = randomUUID().replaceAll('-', '').slice(0, 12);
 const sourceProject = 'tattoo-p5-src-' + identifier;
 const targetProject = 'tattoo-p5-dst-' + identifier;
@@ -24,6 +23,7 @@ const applicationEnvironment = [
   'REMOTE_WRITES_ENABLED',
   'WEB_PORT',
   'TATTOO_VERSION',
+  'TATTOO_IMAGE',
   'COOKIE_SECURE',
   'DATABASE_URL',
   'STORAGE_PATH',
@@ -62,11 +62,15 @@ function redact(value) {
   return result.slice(-5000);
 }
 
-function run(executable, args, { input, allowFailure = false, timeout = 300000, label } = {}) {
+function run(
+  executable,
+  args,
+  { input, allowFailure = false, timeout = 300000, label, env = isolatedEnvironment } = {},
+) {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
       cwd: repository,
-      env: isolatedEnvironment,
+      env,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -166,7 +170,7 @@ async function environmentFile(name, portNumber, encryptionKey = key, remoteWrit
       'ADMIN_PASSWORD=' + adminPassword,
       'REMOTE_WRITES_ENABLED=' + remoteWrites,
       'WEB_PORT=' + portNumber,
-      'TATTOO_VERSION=' + version,
+      'TATTOO_IMAGE=' + imageRef,
       '',
     ].join('\n'),
     { mode: 0o600, flag: 'wx' },
@@ -432,6 +436,33 @@ async function checkRestored(fixture, expectedSessions = 0) {
 
 try {
   console.info('本验收要求 Docker 发布端口可由当前管理机通过 127.0.0.1 访问。');
+  const resolved = await run(
+    'docker',
+    [
+      'compose',
+      '--file',
+      join(repository, 'compose.yaml'),
+      '--file',
+      join(repository, 'compose.build.yaml'),
+      'config',
+      '--images',
+    ],
+    {
+      env: {
+        ...isolatedEnvironment,
+        ...(process.env.TATTOO_VERSION ? { TATTOO_VERSION: process.env.TATTOO_VERSION } : {}),
+        ...(process.env.TATTOO_IMAGE ? { TATTOO_IMAGE: process.env.TATTOO_IMAGE } : {}),
+      },
+      label: '解析源码构建镜像引用',
+    },
+  );
+  const applications = [
+    ...new Set(
+      resolved.stdout.split(/\r?\n/).filter((image) => image && image !== 'postgres:16-alpine'),
+    ),
+  ];
+  assert.equal(applications.length, 1, 'API 与 Worker 必须使用同一个应用镜像');
+  imageRef = applications[0];
   temporaryRoot = await realpath(tmpdir());
   directory = await mkdtemp(join(temporaryRoot, 'tattoo-p5-recovery-'));
   const sourcePort = await port();
@@ -457,7 +488,7 @@ try {
   });
   const image = await run(
     'docker',
-    ['image', 'inspect', 'tattoo-app:' + version, '--format', '{{.Os}}/{{.Architecture}} {{.Id}}'],
+    ['image', 'inspect', imageRef, '--format', '{{.Os}}/{{.Architecture}} {{.Id}}'],
     { label: '已构建镜像检查' },
   );
   assert.match(image.stdout, /^linux\//, '本验收使用 Linux 容器');
@@ -788,7 +819,7 @@ try {
   const manifestText = await readFile(join(backupDirectory, 'manifest.json'), 'utf8');
   const manifest = JSON.parse(manifestText);
   assert.equal(manifest.schemaVersion, 1);
-  assert.equal(manifest.application.imageRef, 'tattoo-app:' + version);
+  assert.equal(manifest.application.imageRef, imageRef);
   assert.match(manifest.application.imageId, /^sha256:[0-9a-f]{64}$/);
   assert.equal(
     manifest.keyFingerprint,

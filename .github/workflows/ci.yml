@@ -1,5 +1,9 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
 permissions:
   contents: read
 jobs:
@@ -19,8 +23,11 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql://tattoo:tattoo_test@127.0.0.1:5432/tattoo_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: npm
@@ -34,8 +41,76 @@ jobs:
       - name: Browser checks for sources, AI creation, editing and draft delivery
         run: node tests/e2e/run-p2.mjs
       - run: npm run setup
-      - run: docker compose config --quiet
-      - run: docker compose build
+      - run: docker compose -f compose.yaml -f compose.build.yaml config --quiet
+      - run: docker compose -f compose.yaml -f compose.build.yaml build api
       - run: node scripts/verify-foundation.mjs
       - name: Verify isolated backup and recovery
         run: npm run verify:recovery
+  publish:
+    name: Publish GHCR image
+    needs: verify
+    if: github.event_name == 'push' && github.repository == 'brucewar/tattoo'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: ghcr-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      IMAGE: ghcr.io/brucewar/tattoo
+    steps:
+      - name: Check out the verified commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+      - name: Prepare immutable image tag
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/publish-image.mjs prepare
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Build and publish immutable tag
+        id: image
+        if: steps.plan.outputs.reuse_digest == ''
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          target: application
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/brucewar/tattoo:${{ steps.plan.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/brucewar/tattoo
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.plan.outputs.tag }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha,scope=tattoo-amd64
+          cache-to: type=gha,mode=max,scope=tattoo-amd64
+      - name: Reuse an existing verified revision
+        if: steps.plan.outputs.reuse_digest != ''
+        env:
+          DIGEST: ${{ steps.plan.outputs.reuse_digest }}
+          TARGET_EXISTS: ${{ steps.plan.outputs.target_exists }}
+        run: node scripts/publish-image.mjs reuse
+      - name: Pull and verify the published image
+        env:
+          DIGEST: ${{ steps.image.outputs.digest || steps.plan.outputs.reuse_digest }}
+        run: node scripts/verify-published.mjs --image "${IMAGE}@${DIGEST}"
+      - name: Update verified aliases and report digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.image.outputs.digest || steps.plan.outputs.reuse_digest }}
+        run: node scripts/publish-image.mjs finalize

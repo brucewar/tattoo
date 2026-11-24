@@ -14,7 +14,20 @@
 
 开发遵循 SPEC → PLAN → IMPLEMENT → VERIFY → RELEASE。完成项必须有验证证据。
 
-## 获取源码
+## Docker 镜像部署
+
+镜像：`ghcr.io/brucewar/tattoo:0.1.0-rc.1`，首版平台为 `linux/amd64`。前端、API 和 Worker 共用一个 Tattoo 应用镜像；Compose 运行 API、Worker 与 PostgreSQL 三个容器。
+
+只需下载发布版本的 `compose.yaml` 并准备 `.env`，Docker 主机无需安装 Node.js 或拉取源码。首次配置可通过应用镜像生成，操作系统对应命令见[直接拉取镜像部署](docs/DEPLOYMENT.md)。已有配置继续保留，不重新生成密钥。
+
+```bash
+docker compose pull
+docker compose up -d --no-build --remove-orphans --wait --wait-timeout 180
+```
+
+默认访问 `http://localhost:8080`。使用 `.env` 的管理员配置登录；模型和公众号密钥在本机页面填写。版本固定为候选版，不会因普通重建自动升级。完整配置、升级和版本策略见[部署说明](docs/DEPLOYMENT.md)。
+
+## 源码开发与管理工具
 
 ```bash
 git clone https://github.com/brucewar/tattoo.git
@@ -25,13 +38,13 @@ cd tattoo
 
 开发与 Docker 验证步骤见 [开发说明](docs/DEVELOPMENT.md)，实际结果见 [P1 验证记录](docs/P1-VERIFICATION.md)、[P2 验证记录](docs/P2-VERIFICATION.md)、[P3 验证记录](docs/P3-VERIFICATION.md) 和 [P4 验证记录](docs/P4-VERIFICATION.md)。
 
-## 本地启动
+## 从源码构建
 
 Docker 主机需要运行 Linux 容器的 Docker Engine / Compose。以下配置命令在有 Node.js 22（至少 22.15）的管理电脑执行，Docker 主机不额外需要 Node.js。
 
 ```bash
 node scripts/configure.mjs
-docker compose up -d --build --wait
+docker compose -f compose.yaml -f compose.build.yaml up -d --build --remove-orphans --wait
 ```
 
 配置文件已存在时跳过配置生成，避免覆盖密钥。启动后访问 `http://localhost:8080`，使用本机 `.env` 的管理员配置登录。AppID/AppSecret 在账号设置页填写；创建测试草稿还需显式启用远程写入，步骤见开发说明。

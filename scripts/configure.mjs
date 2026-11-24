@@ -18,6 +18,7 @@ if (
 const password = randomBytes(24).toString('hex');
 const content = [
   '# Generated locally. Do not commit this file.',
+  'TATTOO_VERSION=0.1.0-rc.1',
   `POSTGRES_PASSWORD=${password}`,
   `DATABASE_URL=postgresql://tattoo:${password}@127.0.0.1:55433/tattoo`,
   `APP_ENCRYPTION_KEY=${randomBytes(32).toString('base64')}`,

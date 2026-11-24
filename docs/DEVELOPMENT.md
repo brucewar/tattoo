@@ -36,12 +36,14 @@ docker compose -f compose.test.yaml up -d --wait
 
 ```bash
 npm run setup
-docker compose config --quiet
-docker compose build
-docker compose up -d --wait
+docker compose -f compose.yaml -f compose.build.yaml config --quiet
+docker compose -f compose.yaml -f compose.build.yaml build api
+docker compose -f compose.yaml -f compose.build.yaml up -d --no-build --remove-orphans --wait
 ```
 
 配置文件已存在时跳过 `setup`。默认访问 `http://localhost:8080`；局域网访问需将 `.env` 的 `APP_ORIGIN` 改为实际访问来源，包括端口。前端构建包含在单一应用镜像内，由 API 提供；API 与 Worker 共享镜像，只有 API 对宿主开放 Web 端口。Compose 共 API、Worker、PostgreSQL 三个容器。API 在启动前执行 `prisma migrate deploy`，失败则不启动 HTTP 服务；Worker 等待 API 就绪后启动。数据库与图片使用命名卷。
+
+默认 `compose.yaml` 从 GHCR 拉取固定版本，没有 `build`。源码开发需显式添加 `compose.build.yaml`；构建时不要设置指向远程 digest 的 `TATTOO_IMAGE`。只使用预构建镜像见[部署说明](DEPLOYMENT.md)。
 
 当前已实现登录、账号设置、只读接口验证、固定测试草稿，以及文章编辑、修订、预览和普通文章草稿投递。模拟服务通过仍不能解释为真实微信权限通过。应用会固定读取仓库根目录的 `.env`，相对素材路径也以仓库根目录解析，因此从 workspace 启动 API/Worker 时与 Docker 的配置规则一致。
 
@@ -57,12 +59,12 @@ docker compose up -d --wait
 
 ## 显式创建测试草稿
 
-1. 将 `.env` 中 `REMOTE_WRITES_ENABLED` 改为 `true`，执行 `docker compose up -d --force-recreate api worker` 使配置生效。
+1. 将 `.env` 中 `REMOTE_WRITES_ENABLED` 改为 `true`，执行 `docker compose -f compose.yaml -f compose.build.yaml up -d --force-recreate api worker` 使配置生效。
 2. 在账号设置中选择公众号，上传 JPG/PNG 封面，确认将产生远程素材及草稿后发起测试。
 3. 系统创建持久任务，Worker 在后台上传封面并创建固定测试文章；重复点击或网络重试沿用同一请求标识。
 4. 在投递详情查看结果与远程 ID，并在微信后台确认草稿实际可见。测试素材与草稿由用户按需手动清理，系统不自动删除。
 
-连接中断、无法解析响应或危险阶段的进程重启会进入“结果待核对”，不会自动重复提交。先执行 `docker compose stop worker` 并确认旧 Worker 已结束，再在微信后台检查。人工核对需填写说明、确认已停止 Worker；服务端同时检查全局执行权和账号锁。确认已创建可以没有远程 ID，但结果明确标为“人工确认”，不会冒充接口验证。确认未创建后另行显式重试，最后执行 `docker compose up -d worker`。
+连接中断、无法解析响应或危险阶段的进程重启会进入“结果待核对”，不会自动重复提交。先执行 `docker compose -f compose.yaml -f compose.build.yaml stop worker` 并确认旧 Worker 已结束，再在微信后台检查。人工核对需填写说明、确认已停止 Worker；服务端同时检查全局执行权和账号锁。确认已创建可以没有远程 ID，但结果明确标为“人工确认”，不会冒充接口验证。确认未创建后另行显式重试，最后执行 `docker compose -f compose.yaml -f compose.build.yaml up -d worker`。
 
 ## 文章编辑与预览
 
@@ -93,7 +95,7 @@ docker compose up -d --wait
 ```powershell
 $tattooNewPassword = Read-Host '新管理员密码' -AsSecureString
 $env:TATTOO_NEW_PASSWORD = [System.Net.NetworkCredential]::new('', $tattooNewPassword).Password
-docker compose exec -T -e TATTOO_NEW_PASSWORD api node scripts/reset-admin.mjs
+docker compose -f compose.yaml -f compose.build.yaml exec -T -e TATTOO_NEW_PASSWORD api node scripts/reset-admin.mjs
 Remove-Item Env:TATTOO_NEW_PASSWORD
 ```
 
@@ -109,6 +111,6 @@ Remove-Item Env:TATTOO_NEW_PASSWORD
 
 ## 持久化与后续恢复
 
-普通重建使用 `docker compose up -d --build`，不要添加 `down -v`。备份应包含一致的 PostgreSQL 导出和素材卷，主密钥独立保存；已提供 `node scripts/backup.mjs` 与 `node scripts/restore.mjs`；管理电脑通过当前 Docker context 操作目标容器，数据库与素材采用同一次停机备份。具体参数、主密钥和匹配镜像保管、空实例恢复及旧任务核对见 [运维说明](OPERATIONS.md)。恢复实例先保持 `REMOTE_WRITES_ENABLED=false`，核对旧任务后再显式启用。此开关不代表微信账号已具备写权限。
+源码重建使用 `docker compose -f compose.yaml -f compose.build.yaml up -d --build --remove-orphans`，不要添加 `down -v`。备份应包含一致的 PostgreSQL 导出和素材卷，主密钥独立保存；已提供 `node scripts/backup.mjs` 与 `node scripts/restore.mjs`。源码部署的备份/恢复命令均添加 `--compose-file compose.yaml --compose-file compose.build.yaml`，按顺序使用同一组配置；管理电脑通过当前 Docker context 操作目标容器，数据库与素材采用同一次停机备份。具体参数、主密钥和匹配镜像保管、空实例恢复及旧任务核对见 [运维说明](OPERATIONS.md)。恢复实例先保持 `REMOTE_WRITES_ENABLED=false`，核对旧任务后再显式启用。此开关不代表微信账号已具备写权限。
 
 恢复工具的独立容器验收入口为 `npm run verify:recovery`，需要已构建的应用镜像和可在管理电脑环回地址访问的 Docker 发布端口。它只创建随机隔离项目并在结束后删除自身容器和卷，不操作日常部署；历史四服务结果见 [P5 验证记录](P5-VERIFICATION.md)，单镜像结构以本轮新记录为准。

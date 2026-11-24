@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   cliOptions,
@@ -204,5 +204,31 @@ describe('恢复显式目标', () => {
       /项目名/,
     );
     expect(cliOptions('backup', ['--output', 'backup']).project).toBe('tattoo');
+  });
+
+  it('按调用顺序保留指定的 Compose 文件，不自动混入另一部署配置', () => {
+    const options = cliOptions('backup', [
+      '--output',
+      'backup',
+      '--compose-file',
+      'compose.yaml',
+      '--compose-file',
+      'compose.build.yaml',
+    ]);
+    expect(options.composeFiles).toEqual([resolve('compose.yaml'), resolve('compose.build.yaml')]);
+    const explicit = cliOptions('restore', [
+      '--input',
+      'backup',
+      '--project',
+      'restored',
+      '--env-file',
+      'restore.env',
+      '--compose-file',
+      'deployment/custom.yaml',
+    ]);
+    expect(explicit.composeFiles).toEqual([resolve('deployment/custom.yaml')]);
+    expect(cliOptions('backup', ['--output', 'backup']).composeFiles).toEqual([
+      resolve('compose.yaml'),
+    ]);
   });
 });

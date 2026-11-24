@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const project = 'tattoo-p1-smoke';
 const cwd = fileURLToPath(new URL('../', import.meta.url));
 const env = { ...process.env, WEB_PORT: '18080', APP_ORIGIN: 'http://localhost:18080' };
-const prefix = ['compose', '-p', project];
+const prefix = ['compose', '-f', 'compose.yaml', '-f', 'compose.build.yaml', '-p', project];
 const marker = randomUUID();
 const temporaryRoot = await realpath(tmpdir());
 const legacyDirectory = await mkdtemp(join(temporaryRoot, 'tattoo-legacy-web-'));
@@ -40,7 +40,7 @@ try {
   const legacyConfiguration = JSON.parse(compose(['config', '--format', 'json']).stdout);
   delete legacyConfiguration.services.api.ports;
   legacyConfiguration.services.web = {
-    image: `tattoo-app:${env.TATTOO_VERSION || 'local'}`,
+    image: legacyConfiguration.services.api.image,
     command: [
       'node',
       '-e',
@@ -60,12 +60,16 @@ try {
     },
   };
   await writeFile(legacyFile, JSON.stringify(legacyConfiguration), { mode: 0o600 });
-  const legacy = spawnSync('docker', [...prefix, '--file', legacyFile, 'up', '-d', '--wait'], {
-    cwd,
-    env,
-    encoding: 'utf8',
-    windowsHide: true,
-  });
+  const legacy = spawnSync(
+    'docker',
+    ['compose', '-p', project, '--file', legacyFile, 'up', '-d', '--wait'],
+    {
+      cwd,
+      env,
+      encoding: 'utf8',
+      windowsHide: true,
+    },
+  );
   assert.equal(legacy.status, 0, legacy.stderr);
   assert.equal(await (await fetch('http://127.0.0.1:18080/')).text(), 'legacy-web');
   execute(`

@@ -24,14 +24,15 @@ export function cliOptions(action, args = process.argv.slice(2)) {
       output: { type: 'string' },
       project: { type: 'string' },
       'env-file': { type: 'string' },
+      'compose-file': { type: 'string', multiple: true },
       help: { type: 'boolean' },
     },
   });
   if (values.help) {
     console.info(
       action === 'backup'
-        ? 'node scripts/backup.mjs --output <新目录> [--project tattoo] [--env-file .env]'
-        : 'node scripts/restore.mjs --input <备份目录> --project <目标项目> --env-file <恢复配置>',
+        ? 'node scripts/backup.mjs --output <新目录> [--project tattoo] [--env-file .env] [--compose-file <文件> ...]'
+        : 'node scripts/restore.mjs --input <备份目录> --project <目标项目> --env-file <恢复配置> [--compose-file <文件> ...]',
     );
     return null;
   }
@@ -49,6 +50,9 @@ export function cliOptions(action, args = process.argv.slice(2)) {
     project,
     envFile: resolve(values['env-file'] ?? '.env'),
     directory: resolve(action === 'backup' ? values.output : values.input),
+    composeFiles: (values['compose-file'] ?? [join(repository, 'compose.yaml')]).map((file) =>
+      resolve(file),
+    ),
   };
 }
 
@@ -124,8 +128,10 @@ function controller(options) {
     options.project,
     '--env-file',
     options.envFile,
-    '--file',
-    join(repository, 'compose.yaml'),
+    ...(options.composeFiles ?? [join(repository, 'compose.yaml')]).flatMap((file) => [
+      '--file',
+      file,
+    ]),
   ];
   const compose = (args, io) => execute([...prefix, ...args], io);
   const node = (script) =>

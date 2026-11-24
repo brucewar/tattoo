@@ -1,0 +1,10 @@
+services:
+  api:
+    image: ${TATTOO_IMAGE:-tattoo-app:${TATTOO_VERSION:-local}}
+    pull_policy: never
+    build:
+      context: .
+      target: application
+  worker:
+    image: ${TATTOO_IMAGE:-tattoo-app:${TATTOO_VERSION:-local}}
+    pull_policy: never

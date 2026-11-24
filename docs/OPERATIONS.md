@@ -18,6 +18,8 @@ Docker context 决定 CLI 操作哪个 Docker daemon，`DOCKER_CONTEXT`、`DOCKE
 
 ## 首次部署
 
+默认 `compose.yaml` 直接拉取 GHCR 固定版本，没有构建步骤。Docker 主机只需 Compose 和本地配置；不安装 Node.js 的首次配置方法见[镜像部署说明](DEPLOYMENT.md)。下面的 `node` 管理命令在检出匹配源码的管理电脑执行。
+
 ```bash
 node scripts/configure.mjs
 ```
@@ -32,12 +34,13 @@ node scripts/configure.mjs
 | `APP_ENCRYPTION_KEY`             | 生成的 32 字节主密钥，供已保存账号解密；独立备份，升级时保持不变。                                    |
 | `POSTGRES_PASSWORD`              | 生成的数据库密码。保留部署配置，不随意修改已有数据库的连接密码。                                      |
 | `REMOTE_WRITES_ENABLED`          | 首次保持 `false`，真实测试草稿前再显式开启。                                                          |
-| `TATTOO_VERSION`                 | 单一应用镜像的标签，API 与 Worker 共用。建议填写已检出的提交短哈希，避免反复覆盖 `local` 标签。       |
+| `TATTOO_VERSION`                 | GHCR 固定版本标签，API 与 Worker 共用。默认 `0.1.0-rc.1`，升级时明确修改。                            |
+| `TATTOO_IMAGE`                   | 可选完整镜像引用，支持 `ghcr.io/brucewar/tattoo@sha256:...`；优先于版本标签。                         |
 
 ```bash
 docker compose -p tattoo --env-file .env config --quiet
-docker compose -p tattoo --env-file .env build
-docker compose -p tattoo --env-file .env up -d --wait --wait-timeout 180
+docker compose -p tattoo --env-file .env pull
+docker compose -p tattoo --env-file .env up -d --no-build --wait --wait-timeout 180
 docker compose -p tattoo --env-file .env ps
 docker compose -p tattoo --env-file .env images
 ```
@@ -47,6 +50,8 @@ docker compose -p tattoo --env-file .env images
 记录源码提交、应用镜像 ID、Docker / Compose 版本和实际平台。镜像应匹配 Docker 主机的平台；多平台构建能力不等于本项目已经发布或实测所有平台的镜像。[Docker 多平台镜像](https://docs.docker.com/build/building/multi-platform/)
 
 默认项目名是 `tattoo`。使用其他项目名时，后续备份、日志、停机和恢复命令也要显式使用该名称。`-p` 优先于配置文件中的 `name:`；环境文件可用 `--env-file` 指定，Shell 环境变量可能覆盖文件内的值。[Compose 项目与参数](https://docs.docker.com/reference/cli/docker/compose/)、[环境变量优先级](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)
+
+仓库默认管理命令使用镜像部署的 `compose.yaml`。若使用单独下载的 Compose 文件，给备份/恢复命令加 `--compose-file /path/to/deployment/compose.yaml`；若使用源码构建配置，追加 `--compose-file compose.yaml --compose-file compose.build.yaml`。多个文件按顺序合并，一旦显式指定就不自动加入默认文件。后续手动 `docker compose` 操作也使用同一组文件；完整源码构建方式见[开发说明](DEVELOPMENT.md)。
 
 ## 局域网与 HTTPS
 
@@ -93,7 +98,7 @@ docker compose -p tattoo --env-file .env up -d --wait --wait-timeout 180
 下例 `release-a` 是示例，请替换为备份时 `TATTOO_VERSION` 实际使用的标签：
 
 ```bash
-docker image save --output ./data/tattoo-images.tar tattoo-app:release-a postgres:16-alpine
+docker image save --output ./data/tattoo-images.tar ghcr.io/brucewar/tattoo:release-a postgres:16-alpine
 ```
 
 在目标 Docker context 中加载：
@@ -112,7 +117,7 @@ docker image load --input ./data/tattoo-images.tar
 node scripts/configure.mjs --output .env.restore --origin http://localhost:18081
 ```
 
-在本机编辑 `.env.restore`：设置实际访问的 `APP_ORIGIN` 与匹配的 `WEB_PORT`（上例端口为 `18081`）；将主密钥替换为独立保存的原 `APP_ENCRYPTION_KEY`；`TATTOO_VERSION` 指向已加载、与备份一致的应用版本；保持 `REMOTE_WRITES_ENABLED=false`。新数据库可使用新生成的数据库密码。已有管理员会随数据恢复，新配置的初始管理员密码不会覆盖其旧密码。
+在本机编辑 `.env.restore`：设置实际访问的 `APP_ORIGIN` 与匹配的 `WEB_PORT`（上例端口为 `18081`）；将主密钥替换为独立保存的原 `APP_ENCRYPTION_KEY`；`TATTOO_VERSION` 指向已加载、与备份一致的应用版本。若设置 `TATTOO_IMAGE`，使用与备份匹配的完整引用，其优先级高于版本标签；保持 `REMOTE_WRITES_ENABLED=false`。新数据库可使用新生成的数据库密码。已有管理员会随数据恢复，新配置的初始管理员密码不会覆盖其旧密码。
 
 确认当前 Shell 没有用环境变量将远程写入开关或配置覆盖为其他值。使用备份对应源码的恢复工具、Compose 文件和镜像：
 
@@ -150,12 +155,12 @@ docker compose -p tattoo-restored --env-file .env.restore up -d --force-recreate
 ## 升级与回滚
 
 1. 记录当前提交、镜像 ID 和配置，保存当前镜像，完成停机一致备份，并确认独立密钥副本可用。
-2. 检出经过验证的新提交，将 `TATTOO_VERSION` 改为新标签；保留原主密钥、数据库密码和持久卷。
-3. 重新构建并启动，等待健康检查，检查登录、文章、图片与任务记录。由旧版四服务升级时，使用下方 `--remove-orphans` 移除同项目的旧 Web 容器，将原 Web 端口交给 API；数据库与素材卷保持。迁移失败时排查原因，不绕过启动门槛。
+2. 取得经过验证的新版本 Compose 和匹配管理工具，将 `TATTOO_VERSION` 改为新标签（若使用 `TATTOO_IMAGE`，同步修改其完整引用）；保留原主密钥、数据库密码和持久卷。
+3. 拉取镜像并启动，等待健康检查，检查登录、文章、图片与任务记录。由旧版四服务升级时，使用下方 `--remove-orphans` 移除同项目的旧 Web 容器，将原 Web 端口交给 API；数据库与素材卷保持。迁移失败时排查原因，不绕过启动门槛。
 
 ```bash
-docker compose -p tattoo --env-file .env build
-docker compose -p tattoo --env-file .env up -d --remove-orphans --wait --wait-timeout 180
+docker compose -p tattoo --env-file .env pull
+docker compose -p tattoo --env-file .env up -d --no-build --remove-orphans --wait --wait-timeout 180
 docker compose -p tattoo --env-file .env ps
 ```
 
