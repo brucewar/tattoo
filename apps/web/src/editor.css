@@ -298,6 +298,20 @@
 .metadata-field .form-note {
   font-size: 0.6875rem;
 }
+.digest-hint {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.7;
+  margin: 8px 0 0;
+  overflow-wrap: anywhere;
+}
+.digest-hint.is-over-limit {
+  color: #a34132;
+}
+.digest-hint > span {
+  display: block;
+  margin-top: 4px;
+}
 .article-cover,
 .cover-empty {
   width: 100%;

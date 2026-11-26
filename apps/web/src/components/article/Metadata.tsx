@@ -1,5 +1,6 @@
 import { Button, Input } from 'antd';
 import type { Article, ArticleInput } from '@tattoo/contracts';
+import { WECHAT_DIGEST_MAX_LENGTH } from '@tattoo/contracts';
 import { date } from '../../ui';
 import { assetUrl } from './document';
 
@@ -18,6 +19,8 @@ export function ArticleMetadata({
   onCover: () => void;
   onRemoveCover: () => void;
 }) {
+  const digestLength = draft.digest.length;
+  const digestOverflow = Math.max(0, digestLength - WECHAT_DIGEST_MAX_LENGTH);
   return (
     <aside className="surface article-metadata" aria-label="文章信息">
       <h2>文章信息</h2>
@@ -38,8 +41,22 @@ export function ArticleMetadata({
           rows={4}
           value={draft.digest}
           disabled={disabled}
+          status={digestOverflow ? 'error' : undefined}
+          aria-invalid={digestOverflow > 0 || undefined}
+          aria-describedby="article-digest-help"
           onChange={(event) => onChange('digest', event.target.value)}
         />
+        <p
+          id="article-digest-help"
+          className={`digest-hint${digestOverflow ? ' is-over-limit' : ''}`}
+          title="按公众号字符限制计数，部分 emoji 会占多个字符。"
+          aria-live="polite"
+        >
+          {digestLength} / {WECHAT_DIGEST_MAX_LENGTH} 字符（含标点）
+          {digestOverflow > 0 && (
+            <span>超出 {digestOverflow} 字符，投递前请缩短摘要；当前仍可保存。</span>
+          )}
+        </p>
       </div>
       <div className="metadata-field">
         <label htmlFor="article-source">原文链接</label>

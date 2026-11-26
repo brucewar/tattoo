@@ -12,6 +12,8 @@ export type DocumentNode = {
   content?: DocumentNode[];
 };
 export const MAX_CONTENT_BYTES = 2 * 1024 * 1024;
+/** Application limit counted with JavaScript string.length (UTF-16 code units). */
+export const WECHAT_DIGEST_MAX_LENGTH = 120;
 const encoder = new TextEncoder();
 const byteLength = (value: unknown) => encoder.encode(JSON.stringify(value)).byteLength;
 const validStoredText = (value: string) => !/[\u0000\uD800-\uDFFF]/u.test(value);

@@ -1,3 +1,5 @@
+import { WECHAT_DIGEST_MAX_LENGTH } from '@tattoo/contracts';
+
 /** Verified from the subscription-account official docs on 2026-11-20. */
 export const WECHAT_RULE_SOURCES = {
   draft:
@@ -15,7 +17,7 @@ export const WECHAT_RULE_SOURCES = {
 export const WECHAT_LIMITS = Object.freeze({
   titleCharacters: 32,
   authorCharacters: 16,
-  digestCharacters: 120,
+  digestCharacters: WECHAT_DIGEST_MAX_LENGTH,
   htmlCharacters: 20_000,
   htmlBytes: 1_000_000,
   sourceUrlBytes: 1_000,

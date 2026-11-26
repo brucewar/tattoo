@@ -3,7 +3,12 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 import { z } from 'zod';
-import { articleInput, type AiGenerationInput, type DocumentNode } from '@tattoo/contracts';
+import {
+  articleInput,
+  WECHAT_DIGEST_MAX_LENGTH,
+  type AiGenerationInput,
+  type DocumentNode,
+} from '@tattoo/contracts';
 
 const IMAGE_BYTES = 10 * 1024 * 1024;
 const TEXT_BYTES = 1024 * 1024;
@@ -151,12 +156,22 @@ export function parseGeneratedArticle(
   const shape = z
     .object({
       title: z.string().trim().min(1).max(500),
-      digest: z.string().max(1000),
+      digest: z
+        .string()
+        .max(
+          WECHAT_DIGEST_MAX_LENGTH,
+          `摘要超过微信公众号 ${WECHAT_DIGEST_MAX_LENGTH} 字符上限（含标点，按 UTF-16 计数），请调整生成要求后手动重试`,
+        ),
       body: z.string().trim().min(1).max(100000),
     })
     .strict()
     .safeParse(value);
-  if (!shape.success) throw new AiProviderError('模型返回的标题、摘要或正文格式不完整');
+  if (!shape.success) {
+    const digestLimit = shape.error.issues.find(
+      (issue) => issue.path[0] === 'digest' && issue.code === 'too_big',
+    );
+    throw new AiProviderError(digestLimit?.message ?? '模型返回的标题、摘要或正文格式不完整');
+  }
   const document = textDocument(shape.data.body);
   const checked = articleInput.safeParse({
     title: shape.data.title,
@@ -419,7 +434,7 @@ export class OpenAiProvider {
     } else {
       const system =
         input.kind === 'ARTICLE'
-          ? 'TASK:ARTICLE\n你是一位中文内容编辑。只输出一个 JSON 对象，严格包含 title、digest、body 三个字符串字段。body 是纯文本正文，可用独立行的 ## 或 ### 标题并以空行分段。不要输出 HTML、外链图片、代码围栏或额外字段。不要捏造参考资料中不存在的事实来源。'
+          ? `TASK:ARTICLE\n你是一位中文内容编辑。只输出一个 JSON 对象，严格包含 title、digest、body 三个字符串字段。摘要（digest）建议控制在 100 字符以内，不超过 ${WECHAT_DIGEST_MAX_LENGTH} 字符（含标点，按 UTF-16 代码单元计数，与本地 JavaScript 字符串 length 一致）。body 是纯文本正文，可用独立行的 ## 或 ### 标题并以空行分段。不要输出 HTML、外链图片、代码围栏或额外字段。不要捏造参考资料中不存在的事实来源。`
           : input.kind === 'REWRITE'
             ? 'TASK:REWRITE\n根据用户要求改写原文，仅返回改写后的纯文本，不要返回 JSON、HTML、外链图片或说明。保留原文主要含义。'
             : 'TASK:TEST_TEXT\n请只返回一句简短的中文问候，用于验证文本模型调用。';

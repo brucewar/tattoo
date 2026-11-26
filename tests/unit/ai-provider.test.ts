@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   aiGenerationInput,
   aiModelInput,
+  articleInput,
   type AiGenerationInput,
 } from '../../packages/contracts/src';
 import {
@@ -577,6 +578,101 @@ describe('Responses 与 Anthropic Messages 文本协议', () => {
       provider.generate({ ...connection, protocol: 'images-generations' }, input(), key),
     ).rejects.toThrow('协议');
     expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe('AI 文章摘要的微信长度约束', () => {
+  const protocols = ['chat-completions', 'responses', 'anthropic-messages'] as const;
+  const article = (digest: string) =>
+    JSON.stringify({ title: '摘要长度回归', digest, body: '完整正文需要保留。' });
+  function response(protocol: (typeof protocols)[number], digest: string) {
+    const content = article(digest);
+    if (protocol === 'responses')
+      return json({
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [{ type: 'output_text', text: content }],
+          },
+        ],
+      });
+    if (protocol === 'anthropic-messages')
+      return json({
+        type: 'message',
+        role: 'assistant',
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: content }],
+      });
+    return completion(content);
+  }
+
+  it.each(protocols)('%s 的文章请求明确提示摘要上限、建议长度和标点计数', async (protocol) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(protocol, '可采用的短摘要。'));
+    await new OpenAiProvider(fetcher).generate({ ...connection, protocol }, input(), key);
+    const sent = JSON.parse(String(fetcher.mock.calls[0]![1]?.body));
+    const instructions: string =
+      protocol === 'responses'
+        ? sent.instructions
+        : protocol === 'anthropic-messages'
+          ? sent.system
+          : sent.messages.find((message: { role: string }) => message.role === 'system').content;
+    expect(instructions).toContain('摘要');
+    expect(instructions).toMatch(
+      /(?:不超过|上限)[^。；\n]{0,12}120|120[^。；\n]{0,12}(?:上限|以内)/,
+    );
+    expect(instructions).toMatch(/建议[^。；\n]{0,20}100[^。；\n]{0,8}(?:以内|内)/);
+    expect(instructions).toContain('含标点');
+  });
+
+  it.each([
+    { label: '中文与标点', accepted: '摘'.repeat(119) + '。', rejected: '摘'.repeat(120) + '。' },
+    { label: '成对 emoji', accepted: '🌿'.repeat(60), rejected: '🌿'.repeat(60) + '！' },
+    { label: '中文与 emoji', accepted: '摘'.repeat(118) + '🌿', rejected: '摘'.repeat(119) + '🌿' },
+  ])(
+    '$label 按 UTF-16 接受完整 120 单位摘要，121 单位明确拒绝且不截断',
+    ({ accepted, rejected }) => {
+      expect(accepted.length).toBe(120);
+      expect(rejected.length).toBe(121);
+      expect(parseGeneratedArticle(article(accepted))).toMatchObject({
+        type: 'article',
+        digest: accepted,
+      });
+      expect(() => parseGeneratedArticle(article(rejected))).toThrow(AiProviderError);
+      expect(() => parseGeneratedArticle(article(rejected))).toThrow(/摘要.*120/);
+    },
+  );
+
+  it.each(protocols)('%s 返回超长摘要时失败，不静默截断或自动重发模型请求', async (protocol) => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(response(protocol, '摘'.repeat(120) + '。'));
+    const execution = new OpenAiProvider(fetcher).generate(
+      { ...connection, protocol },
+      input(),
+      key,
+    );
+    await expect(execution).rejects.toBeInstanceOf(AiProviderError);
+    await expect(execution).rejects.toMatchObject({
+      uncertain: false,
+      message: expect.stringMatching(/摘要.*120/),
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('本地手写稿仍可完整保存超出微信限制的摘要，生成约束不收紧通用稿件结构', () => {
+    const digest = '写'.repeat(121);
+    const stored = articleInput.parse({
+      title: '仍在编辑的本地稿件',
+      digest,
+      document: { type: 'doc', content: [{ type: 'paragraph' }] },
+      author: '',
+      sourceUrl: '',
+      coverId: null,
+    });
+    expect(stored.digest).toBe(digest);
   });
 });
 
