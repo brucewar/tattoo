@@ -1,0 +1,75 @@
+{
+  "upstream": "shadcn-ui/ui",
+  "registry": "new-york-v4",
+  "retrievedAt": "2026-11-28",
+  "ref": "main",
+  "commit": null,
+  "note": "Upstream files were retrieved directly over verified HTTPS. A fixed upstream commit could not be resolved in this environment; sourceSha256 records each unmodified download before local adaptations.",
+  "files": [
+    {
+      "file": "button.tsx",
+      "source": "https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/v4/registry/new-york-v4/ui/button.tsx",
+      "sourceSha256": "79dd6f75f8136394442202d6b8b922fb269eaad0a5dba579397c9d5b41f893bb"
+    },
+    {
+      "file": "input.tsx",
+      "source": "https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/v4/registry/new-york-v4/ui/input.tsx",
+      "sourceSha256": "0c9457181f6ddc80969bcf854e92c362903a55b6e889fbef3fd85343ecc4af5b"
+    },
+    {
+      "file": "textarea.tsx",
+      "source": "https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/v4/registry/new-york-v4/ui/textarea.tsx",
+      "sourceSha256": "5cafcfeeee29534f449387a16b585f5923d2faab1a0cdc50a874416b175f59ce"
+    },
+    {
+      "file": "dialog.tsx",
+      "source": "https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/v4/registry/new-york-v4/ui/dialog.tsx",
+      "sourceSha256": "2ade6074e5fad0a4eb171ead44c43d3301a3c83d186d7236fb1fdbea80ee556b"
+    },
+    {
+      "file": "alert-dialog.tsx",
+      "source": "https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/v4/registry/new-york-v4/ui/alert-dialog.tsx",
+      "sourceSha256": "b3dfb83e54ed8c82071df5289e5149628bf573458fc2da2d62f93f8380041b28"
+    },
+    {
+      "file": "checkbox.tsx",
+      "source": "https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/v4/registry/new-york-v4/ui/checkbox.tsx",
+      "sourceSha256": "ba0ac64064e2d8fa7299d53e9e84b9a4772fef8dd4cf6170c56d3030a1d69941"
+    },
+    {
+      "file": "select.tsx",
+      "source": "https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/v4/registry/new-york-v4/ui/select.tsx",
+      "sourceSha256": "962830436bd0b7ee50e556f0747e277d6a86869ed27d167516346b15f26309d8"
+    },
+    {
+      "file": "tooltip.tsx",
+      "source": "https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/v4/registry/new-york-v4/ui/tooltip.tsx",
+      "sourceSha256": "611e4305879b2773eafe76bf3c5caa69d8e47367fd97887a71634a27828f4433"
+    },
+    {
+      "file": "dropdown-menu.tsx",
+      "source": "https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/v4/registry/new-york-v4/ui/dropdown-menu.tsx",
+      "sourceSha256": "d954efb735f13734751207ad22cb0cddd7f6ec53c59d16675d103dae08cb61fb"
+    },
+    {
+      "file": "badge.tsx",
+      "source": "https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/v4/registry/new-york-v4/ui/badge.tsx",
+      "sourceSha256": "13a9380dfff853ee730c14a52df49f22aecd31f40f2998d7c1e7ec458b6e1650"
+    },
+    {
+      "file": "skeleton.tsx",
+      "source": "https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/v4/registry/new-york-v4/ui/skeleton.tsx",
+      "sourceSha256": "f51ce0fcd31e5c31437382e80ea0af94b4fc3d64221d27091d36824546780a43"
+    },
+    {
+      "file": "separator.tsx",
+      "source": "https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/v4/registry/new-york-v4/ui/separator.tsx",
+      "sourceSha256": "ad7d5403fe337160e41dbf04147896e448ae3a747b8d06660d627d74d60021bc"
+    },
+    {
+      "file": "radio-group.tsx",
+      "source": "https://raw.githubusercontent.com/shadcn-ui/ui/main/apps/v4/registry/new-york-v4/ui/radio-group.tsx",
+      "sourceSha256": "cfc4f99ee68be2fbbd70de3ffad82e1462d5e8e0bb0aecfd190a4f5115325862"
+    }
+  ]
+}

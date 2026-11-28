@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Empty, Modal, Pagination, Spin } from 'antd';
+import { Alert, Button, Empty, Modal, Pagination, Spin } from '../components/ui';
 import { api, errorMessage } from '../api';
 import { date, StateTag, type Page, type DeliveryRecord } from '../ui';
 import { DeliveryDetail } from '../components/DeliveryDetail';
@@ -33,24 +33,39 @@ export function Records({ remoteWritesEnabled }: { remoteWritesEnabled: boolean 
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">每一次投递，都有迹可循</p>
           <h1>投递记录</h1>
-          <p className="secondary">查看文章与测试草稿的执行结果，谨慎处理需要人工核对的投递。</p>
+          <p className="secondary">跟踪草稿投递，查看执行结果与需要核对的任务。</p>
         </div>
         <Button onClick={() => setVersion((value) => value + 1)} loading={loading}>
           刷新记录
         </Button>
       </div>
-      {error && <Alert type="error" showIcon message={error} />}
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          message={error}
+          action={
+            <Button size="small" onClick={() => setVersion((value) => value + 1)}>
+              重新加载
+            </Button>
+          }
+        />
+      )}
       <div className="surface records-surface">
         {loading && records.length === 0 ? (
           <div className="loading-panel">
             <Spin />
           </div>
-        ) : records.length === 0 ? (
+        ) : error && records.length === 0 ? null : records.length === 0 ? (
           <Empty description="还没有投递记录" />
         ) : (
           <div className="records-list">
+            <div className="list-column-heading record-columns" aria-hidden="true">
+              <span>文章 / 公众号</span>
+              <span>投递状态</span>
+              <span>操作</span>
+            </div>
             {records.map((record) => (
               <button
                 type="button"

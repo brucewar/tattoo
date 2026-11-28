@@ -22,6 +22,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 15
     env:
       TEST_DATABASE_URL: postgresql://tattoo:tattoo_test@127.0.0.1:5432/tattoo_test
+      TATTOO_IMAGE: tattoo-app:ci
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:

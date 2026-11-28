@@ -408,6 +408,16 @@ const accountCheck = `
     for (const row of models.rows) if (row.apiKeyEncrypted) box.decrypt(row.apiKeyEncrypted);
     const searches = await db.query('SELECT "apiKeyEncrypted" FROM "SourceSearchConfig"');
     for (const row of searches.rows) if (row.apiKeyEncrypted) box.decrypt(row.apiKeyEncrypted);
+    const users = await db.query('SELECT id, "totpSecretEncrypted", "pendingTotpEncrypted" FROM "User"');
+    for (const row of users.rows) {
+      const prefix = 'tattoo:totp:v1:' + row.id + ':';
+      for (const encrypted of [row.totpSecretEncrypted, row.pendingTotpEncrypted]) {
+        if (!encrypted) continue;
+        const plaintext = box.decrypt(encrypted);
+        if (!plaintext.startsWith(prefix) || !/^[A-Z2-7]{52}$/.test(plaintext.slice(prefix.length)))
+          throw new Error('ACCOUNT_AUTH_KEY_INVALID');
+      }
+    }
     console.log('ACCOUNT_KEYS_OK');
   } finally { await db.end(); }
 `;
@@ -496,6 +506,14 @@ export async function backup(options) {
 export const restoredTasksSql = `
   BEGIN;
   DELETE FROM "Session";
+  DELETE FROM "LoginChallenge";
+  DELETE FROM "RecoveryCode";
+  UPDATE "User" SET "securityVersion"="securityVersion"+1,
+    "pendingTotpEncrypted"=NULL, "pendingTotpExpiresAt"=NULL,
+    "pendingTotpSessionHash"=NULL, "pendingTotpSetupId"=NULL,
+    "factorFailureCount"=0, "factorFailureStartedAt"=NULL, "factorBlockedUntil"=NULL,
+    "totpLastStep"=CASE WHEN "totpSecretEncrypted" IS NULL THEN NULL
+      ELSE GREATEST(COALESCE("totpLastStep",0), FLOOR(EXTRACT(EPOCH FROM clock_timestamp())/30)::integer) END;
   WITH affected AS (
     UPDATE "Delivery" SET state='UNCERTAIN', stage='备份恢复，投递结果待核对',
       error='备份之后原实例可能已执行此任务，请先停止原实例 Worker 并核对微信后台',

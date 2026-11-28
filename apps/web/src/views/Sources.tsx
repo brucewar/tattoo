@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Alert, Button, Empty, Form, Input, Modal, Pagination, Spin, Tag } from 'antd';
+import { Alert, Button, Empty, Input, Modal, Pagination, Spin, Tag } from '../components/ui';
 import { sourceJobInput } from '@tattoo/contracts';
 import type {
   Source,
@@ -173,6 +173,9 @@ export function Sources({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => 
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [feedUrl, setFeedUrl] = useState('');
+  const [feedTitle, setFeedTitle] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
   const [configDirty, setConfigDirty] = useState(false);
@@ -313,7 +316,7 @@ export function Sources({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => 
   }
 
   async function addFeed(values: { url: string; title?: string }) {
-    if (mutation) return;
+    if (busy) return;
     setMutation(true);
     setError('');
     try {
@@ -345,9 +348,8 @@ export function Sources({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => 
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">为下一篇文章准备资料</p>
           <h1>资料</h1>
-          <p className="secondary">采集公开页面、订阅 RSS、按需搜索，再选择资料参与 AI 创作。</p>
+          <p className="secondary">采集链接、订阅 RSS 或按需搜索，为写作积累资料。</p>
         </div>
         <Button onClick={reload} loading={loading} aria-label="刷新资料页面">
           刷新
@@ -378,31 +380,36 @@ export function Sources({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => 
         <section className="surface source-panel" aria-label="链接采集">
           <h2>采集链接</h2>
           <p className="secondary">提取公开网页的标题和文字，不执行网页脚本或下载原站图片。</p>
-          <Form
-            layout="vertical"
-            name="source-url"
-            requiredMark={false}
-            onFinish={(values: { url: string }) =>
-              void submit({ kind: 'URL', url: values.url, origin: 'url' })
-            }
-            disabled={busy}
+          <form
+            className="workspace-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit({ kind: 'URL', url: sourceUrl, origin: 'url' });
+            }}
           >
-            <Form.Item
-              label="原文链接"
-              name="url"
-              rules={[{ required: true, whitespace: true, message: '请输入原文链接' }]}
-            >
-              <Input type="url" placeholder="https://example.com/article" maxLength={4000} />
-            </Form.Item>
+            <div className="form-field">
+              <label htmlFor="source-url-input">原文链接</label>
+              <Input
+                id="source-url-input"
+                type="url"
+                required
+                disabled={busy}
+                placeholder="https://example.com/article"
+                maxLength={4000}
+                value={sourceUrl}
+                onChange={(event) => setSourceUrl(event.target.value)}
+              />
+            </div>
             <Button
               htmlType="submit"
               type="primary"
               aria-label="采集链接"
+              disabled={busy}
               loading={posting && prepared.current?.kind === 'URL'}
             >
               采集链接
             </Button>
-          </Form>
+          </form>
           <p className="form-note">
             登录页、付费墙和依赖脚本的页面可能无法提取。失败时不会保存伪正文。
           </p>
@@ -524,29 +531,41 @@ export function Sources({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => 
           添加 RSS / Atom
           地址后，明确点击拉取获取最新文字。当前不定时抓取，也不自动访问每条原文链接。
         </p>
-        <Form
-          layout="vertical"
-          name="source-feed"
-          className="source-feed-form"
-          onFinish={addFeed}
-          disabled={busy}
-          requiredMark={false}
+        <form
+          className="source-feed-form workspace-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void addFeed({ url: feedUrl, title: feedTitle });
+          }}
         >
-          <Form.Item
-            label="RSS 地址"
-            name="url"
-            rules={[{ required: true, whitespace: true, message: '请输入 RSS 地址' }]}
-          >
-            <Input type="url" maxLength={4000} placeholder="https://example.com/feed.xml" />
-          </Form.Item>
-          <Form.Item label="订阅名称（可选）" name="title">
-            <Input maxLength={200} />
-          </Form.Item>
-          <Button htmlType="submit" loading={mutation} aria-label="添加订阅">
+          <div className="form-field">
+            <label htmlFor="source-feed-url">RSS 地址</label>
+            <Input
+              id="source-feed-url"
+              type="url"
+              required
+              disabled={busy}
+              maxLength={4000}
+              placeholder="https://example.com/feed.xml"
+              value={feedUrl}
+              onChange={(event) => setFeedUrl(event.target.value)}
+            />
+          </div>
+          <div className="form-field">
+            <label htmlFor="source-feed-title">订阅名称（可选）</label>
+            <Input
+              id="source-feed-title"
+              maxLength={200}
+              disabled={busy}
+              value={feedTitle}
+              onChange={(event) => setFeedTitle(event.target.value)}
+            />
+          </div>
+          <Button htmlType="submit" loading={mutation} disabled={busy} aria-label="添加订阅">
             添加订阅
           </Button>
-        </Form>
-        {feeds?.items.length === 0 && (
+        </form>
+        {!loading && !loadError && feeds?.items.length === 0 && (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有 RSS 订阅" />
         )}
         {feeds?.items.map((feed) => (
@@ -614,7 +633,9 @@ export function Sources({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => 
           maxLength={200}
         />
         {!loaded && loading && <Spin />}
-        {sources?.items.length === 0 && <Empty description="还没有匹配的资料" />}
+        {!loading && !loadError && sources?.items.length === 0 && (
+          <Empty description="还没有匹配的资料" />
+        )}
         {sources?.items.map((source) => (
           <button
             className="source-saved-row"
@@ -645,7 +666,7 @@ export function Sources({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => 
       </section>
       <section className="surface source-panel" aria-label="最近资料任务">
         <h2>最近任务</h2>
-        {jobs?.items.length === 0 && (
+        {!loading && !loadError && jobs?.items.length === 0 && (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有采集或搜索任务" />
         )}
         {jobs?.items.map((item) => (

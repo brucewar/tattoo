@@ -1,0 +1,19 @@
+schema: spec-driven
+
+context: |
+  Tattoo 是个人自托管内容工作台，使用 React、TypeScript、Tiptap、NestJS 和 PostgreSQL。
+  docs/SPEC.md 定义完整产品目标与已有业务约束；docs/PLAN.md 记录产品里程碑。
+  OpenSpec 仅记录有明确范围的增量变更，不复制完整产品规格或替代历史验证记录。
+  当前实例使用单管理员、不可变文章修订和单 Worker 持久任务。
+  任何界面变更都必须保留会话恢复、未保存提醒、显式投递确认、密钥保护与不确定结果处理。
+  规范、设计与任务使用中文；需求使用 SHALL，验收场景使用 WHEN / THEN。
+
+rules:
+  proposal:
+    - 明确用户价值、变更范围与不包含内容，避免借界面改版扩张后端功能。
+  specs:
+    - 只定义可观察行为与可验证场景；实现细节写在 design.md。
+  design:
+    - 记录迁移策略、交互和可访问性约束、验证方式及已知限制。
+  tasks:
+    - 未执行的验证不得标记完成；模拟服务不能替代真实模型或微信验证。

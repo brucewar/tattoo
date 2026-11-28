@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Input, Modal, Spin, Tag } from 'antd';
+import { Alert, Button, Input, Modal, Spin, Tag } from '../ui';
 import type {
   AiGenerationJob,
   AiGenerationKind,

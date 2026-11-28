@@ -120,7 +120,10 @@ async function createArticleInUi(page: Page, label: string): Promise<Article> {
   expect(response.ok(), await response.text()).toBe(true);
   const article = (await response.json()).data as Article;
   await expect(page.getByRole('status')).toHaveText('已保存 · 修订 v' + article.version);
-  await expect(page.getByRole('alert')).toContainText('已保存为修订 v' + article.version + '。');
+  const savedMessage = '已保存为修订 v' + article.version + '。';
+  const savedNotice = page.getByRole('note').filter({ hasText: savedMessage });
+  await expect(savedNotice).toHaveText(savedMessage);
+  await expect(savedNotice).toHaveAttribute('aria-live', 'polite');
   await expect(page.getByRole('button', { name: '保存文章', exact: true })).toBeEnabled();
   expect(article.coverId).toBeTruthy();
   return article;
@@ -203,7 +206,7 @@ test('同一浏览器完成账号配置、只读验证、图文编辑预览和�
   await expect(frame.locator('body')).toContainText(bodyText);
   await expect(frame.locator('img')).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('p5-complete-preview.png'), fullPage: true });
-  await preview.getByRole('button', { name: 'Close', exact: true }).click();
+  await preview.getByRole('button', { name: '关闭弹窗', exact: true }).click();
   await expect(preview).not.toBeVisible();
   const localOnly = await audit();
   expect(localOnly.calls).toEqual(readOnly.calls);

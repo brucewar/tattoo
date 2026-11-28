@@ -125,7 +125,7 @@ test('单个主题自动生成图文，跨刷新继续，成稿可编辑预览�
     .poll(async () => (await audit()).calls.image, { timeout: 30000 })
     .toBe(before.calls.image + 1);
   await expect(dialog.getByLabel('本次主题创作', { exact: true })).toContainText('生成封面');
-  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await dialog.getByRole('button', { name: '关闭弹窗', exact: true }).click();
   await page.getByRole('button', { name: '资料', exact: true }).click();
   await page.reload();
   await expect(page.getByRole('heading', { name: '内容', exact: true })).toBeVisible();
@@ -179,7 +179,7 @@ test('单个主题自动生成图文，跨刷新继续，成稿可编辑预览�
   const preview = page.getByRole('dialog').filter({ hasText: '微信预览 · 修订 v2' });
   await expect(preview.getByRole('heading', { name: title, exact: true })).toBeVisible();
   await expect(preview.getByAltText('预览封面', { exact: true })).toBeVisible();
-  await preview.getByRole('button', { name: 'Close', exact: true }).click();
+  await preview.getByRole('button', { name: '关闭弹窗', exact: true }).click();
   const suffix = randomUUID().replaceAll('-', '').slice(0, 16);
   const accountName = '主题草稿验收-' + suffix.slice(0, 6);
   const account = await page.request.post('/api/v1/accounts', {

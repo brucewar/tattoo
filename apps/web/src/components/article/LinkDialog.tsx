@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Input, Modal } from 'antd';
+import { Input, Modal } from '../ui';
 import type { Editor } from '@tiptap/react';
 import { isSafeLink } from './document';
 

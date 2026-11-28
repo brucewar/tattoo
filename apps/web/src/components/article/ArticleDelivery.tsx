@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Modal, Pagination, Select, Spin } from 'antd';
+import { Alert, Button, Checkbox, Modal, Pagination, Select, Spin } from '../ui';
 import type { Account, Article, DeliveryCheck } from '@tattoo/contracts';
 import { api, ApiError, errorMessage, jsonRequest } from '../../api';
 import { date, type DeliveryRecord, type Page } from '../../ui';
@@ -276,8 +276,6 @@ export function ArticleDelivery({
               <Select
                 id="delivery-account"
                 aria-label="目标公众号"
-                virtual={false}
-                getPopupContainer={(trigger) => trigger.parentElement ?? trigger}
                 placeholder="请选择公众号"
                 value={accountId}
                 loading={accountsLoading}

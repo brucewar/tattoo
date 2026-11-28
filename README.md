@@ -46,13 +46,13 @@
 
 ## 快速部署
 
-当前版本为 **`0.1.0-rc.1` 候选版**。建议先在局域网试用，按自己的服务配置验证模型和微信接口。
+本页适用于 **`0.1.0-rc.2` 候选版**，包含工作台改版和账户安全。发布状态与准确镜像 digest 见[对应标签流水线](https://github.com/brucewar/tattoo/actions?query=branch%3Av0.1.0-rc.2)，升级差异见[版本说明](docs/RELEASE-NOTES.md)。
 
 | 部署项     | 说明                                                                  |
 | ---------- | --------------------------------------------------------------------- |
 | 容器环境   | Docker Engine + Docker Compose v2，支持 Linux 容器及 `--wait` 参数    |
 | 支持平台   | **`linux/amd64`（x86-64）**；当前没有 ARM 镜像                        |
-| 应用镜像   | `ghcr.io/brucewar/tattoo:0.1.0-rc.1`，可匿名拉取                      |
+| 应用镜像   | `ghcr.io/brucewar/tattoo:0.1.0-rc.2`                                  |
 | 运行容器   | API、Worker、PostgreSQL 共 3 个；API 与 Worker 共用同一个 Tattoo 镜像 |
 | 访问与存储 | 默认端口 `8080`；数据库与图片分别使用持久卷                           |
 | 主机依赖   | 运行服务无需安装 Node.js、npm 或下载源码                              |
@@ -64,9 +64,9 @@
 ```bash
 mkdir tattoo
 cd tattoo
-curl -fL https://raw.githubusercontent.com/brucewar/tattoo/v0.1.0-rc.1/compose.yaml -o compose.yaml
-docker pull ghcr.io/brucewar/tattoo:0.1.0-rc.1
-docker run --rm --user "$(id -u):$(id -g)" --mount "type=bind,source=$(pwd),target=/config" ghcr.io/brucewar/tattoo:0.1.0-rc.1 node scripts/configure.mjs --output /config/.env
+curl -fL https://raw.githubusercontent.com/brucewar/tattoo/v0.1.0-rc.2/compose.yaml -o compose.yaml
+docker pull ghcr.io/brucewar/tattoo:0.1.0-rc.2
+docker run --rm --user "$(id -u):$(id -g)" --mount "type=bind,source=$(pwd),target=/config" ghcr.io/brucewar/tattoo:0.1.0-rc.2 node scripts/configure.mjs --output /config/.env
 ```
 
 生成器会创建随机管理员密码、数据库密码与加密主密钥，并拒绝覆盖已有 `.env`。

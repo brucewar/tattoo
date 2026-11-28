@@ -1,4 +1,4 @@
-import { Button, Input } from 'antd';
+import { Button, Input } from '../ui';
 import type { Article, ArticleInput } from '@tattoo/contracts';
 import { WECHAT_DIGEST_MAX_LENGTH } from '@tattoo/contracts';
 import { date } from '../../ui';

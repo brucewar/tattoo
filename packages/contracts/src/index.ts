@@ -231,6 +231,51 @@ export const loginInput = z.object({
   email: z.string().email(),
   password: z.string().min(1).max(256),
 });
+
+const currentPassword = z.string().min(1).max(256);
+export const factorCode = z
+  .string()
+  .min(1)
+  .max(80)
+  .transform((value) => value.replace(/[\s-]/g, ''))
+  .refine((value) => /^(?:\d{6}|[0-9a-fA-F]{32})$/.test(value), '请输入 6 位验证码或有效恢复码');
+
+export const securityProofInput = z
+  .object({ currentPassword, code: factorCode.optional() })
+  .strict();
+export const passwordChangeInput = securityProofInput
+  .extend({ newPassword: z.string().min(12).max(256) })
+  .refine((value) => value.currentPassword !== value.newPassword, '新密码不能与原密码相同');
+export const totpSetupInput = z.object({ currentPassword }).strict();
+export const totpEnableInput = z
+  .object({
+    setupId: z.string().uuid(),
+    code: z
+      .string()
+      .min(1)
+      .max(32)
+      .transform((value) => value.replace(/[\s-]/g, ''))
+      .refine((value) => /^\d{6}$/.test(value), '请输入验证器中的 6 位验证码'),
+  })
+  .strict();
+export const totpCancelInput = z.object({ setupId: z.string().uuid() }).strict();
+export const loginFactorInput = z.object({ code: factorCode }).strict();
+
+export type AccountSecurityStatus = {
+  totpEnabled: boolean;
+  recoveryCodesRemaining: number;
+  otherSessionsCount: number;
+};
+export type TotpSetup = {
+  setupId: string;
+  secret: string;
+  otpauthUrl: string;
+  expiresAt: string;
+};
+export type RecoveryCodesResult = AccountSecurityStatus & { recoveryCodes: string[] };
+export type LoginResponse =
+  | { id: string; email: string; remoteWritesEnabled?: boolean; mfaRequired?: false }
+  | { mfaRequired: true; challengeExpiresAt: string };
 export const deliveryInput = z.object({
   revisionId: z.string().uuid(),
   accountId: z.string().uuid(),

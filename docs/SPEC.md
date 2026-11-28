@@ -1,8 +1,8 @@
 # Tattoo 产品目标与分阶段需求规格
 
-- 状态：Accepted / 已确认（2026-11-24）
-- 版本：0.9
-- 日期：2026-11-24（Asia/Shanghai）
+- 状态：Accepted / 已确认（2026-11-28）
+- 版本：0.11
+- 日期：2026-11-28（Asia/Shanghai）
 - 项目：Tattoo
 - 代码仓库：[brucewar/tattoo](https://github.com/brucewar/tattoo)
 - 关联文档：[技术设计](ARCHITECTURE.md)、[实施计划](PLAN.md)
@@ -284,3 +284,19 @@ AI 文章生成按当前微信公众号产出路径约束摘要：提示词要�
 - 升级保留项目名、数据库与素材卷及原密钥。备份恢复管理命令支持明确指定实际部署 Compose 文件，避免误用本地镜像或错误配置。
 
 验收：首个版本实际推送至 GHCR，匿名拉取与隔离 Compose 验收通过；工作流仅在对应提交通过 CI 后写入，RC 不更新 latest；默认纯拉取与源码构建覆盖文件均可执行，镜像内配置生成器保留随机密钥与拒覆盖规则，部署/升级/备份说明与命令一致。
+
+## 14. 工作台界面改版（2026-11-28，已确认）
+
+用户确认使用 shadcn/ui 替换 Ant Design，管理界面参考 Twenty 的紧凑布局，编辑器参考 AFFiNE 的专注写作体验；同时支持浅色、深色和跟随系统，优化导航、表单、状态反馈、键盘与窄屏交互。保留 React、TypeScript、Tiptap 及当前业务和安全边界。
+
+本次增量需求、验收场景与设计统一记录在 [OpenSpec 工作台改版](../openspec/changes/redesign-workspace/proposal.md)，详细行为见 [界面规格](../openspec/changes/redesign-workspace/specs/workspace-ui/spec.md)，不在两套文档重复维护。工作台主题不改变文章或微信排版，预览保持独立浅色阅读画布。未保存提醒、会话恢复、密钥保护、任务找回、已保存修订绑定与显式投递确认继续有效；不新增自动保存、自动付费调用或自动发表。第 7 节延期的“主题系统”指平台排版模板，不限制本次工作台外观选择。
+
+实现与实际检查范围见 [P13 验证记录](P13-VERIFICATION.md)。P14 已在同一工作树追加真实 PostgreSQL/API、API/Worker 浏览器、本地 Docker 生产构建、部署、恢复与镜像内 UI 回归；真实外部服务与 GHCR 发布分开记录，变更保持 active。
+
+## 15. 单管理员账户安全（2026-11-28，已确认）
+
+用户确认保留单管理员，按 OpenSpec 实现网页修改密码、可选 TOTP 双重验证、一次性恢复码与退出其他会话，兼容 Google Authenticator 和 Microsoft Authenticator 的通用验证码方式。此项不增加多用户、公开注册、角色、短信、邮件、Passkey 或第三方云登录。
+
+详细行为、验收场景和安全设计统一见 [OpenSpec 账户安全](../openspec/changes/account-security/proposal.md)、[账户安全规格](../openspec/changes/account-security/specs/account-security/spec.md) 与 [设计](../openspec/changes/account-security/design.md)。修改密码、因子变更和会话撤销重新验证当前凭据；启用双重验证后，密码阶段不建立完整会话。恢复码仅一次展示、哈希保存、单次消费，重新生成废弃旧码。
+
+原有同源请求校验、会话恢复、未保存保护和部署恢复规则继续有效。普通部署密码重置保留已启用因子；明确的部署应急操作才可移除。备份恢复保留可解密的已启用因子，清除旧会话、挑战、待绑定与恢复码，避免一次性凭据复活。使用方式见[账户安全](ACCOUNT-SECURITY.md)，实际完成与验证按 [P14 实施清单](../openspec/changes/account-security/tasks.md) 和 [P14 验证记录](P14-VERIFICATION.md) 维护；单元、真实 PostgreSQL/API、浏览器、类型、构建、本地 Docker 恢复和生产 UI 验证已通过，真实手机扫码未执行，远程 GHCR 发布结果由对应标签流水线记录，变更保持 active。不能以界面或标准向量检查代替真实数据库、容器与手机 App 结果。

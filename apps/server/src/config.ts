@@ -30,6 +30,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       ),
       STORAGE_PATH: z.string().min(1).default('./data/assets'),
       PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+      TEST_BIND_LOOPBACK: flag.default('false'),
       COOKIE_SECURE: flag.optional(),
       WECHAT_API_BASE: z.string().url().default('https://api.weixin.qq.com'),
       ALLOW_MOCK_WECHAT: flag.default('false'),
@@ -43,6 +44,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     );
   }
   const config = parsed.data;
+  if (config.TEST_BIND_LOOPBACK && config.NODE_ENV !== 'test')
+    throw new Error('TEST_BIND_LOOPBACK 只允许在 test 环境使用');
   if (config.SOURCES_TEST_ORIGIN) {
     const testOrigin = new URL(config.SOURCES_TEST_ORIGIN);
     if (

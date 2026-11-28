@@ -17,6 +17,9 @@ async function login(page: Page) {
   await page.getByLabel('管理员邮箱', { exact: true }).fill(process.env.TATTOO_E2E_EMAIL!);
   await page.getByLabel('密码', { exact: true }).fill(process.env.TATTOO_E2E_PASSWORD!);
   await page.getByRole('button', { name: '登录', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '内容', exact: true })).toBeVisible();
+  const openNavigation = page.getByRole('button', { name: '打开导航', exact: true });
+  if (await openNavigation.isVisible()) await openNavigation.click();
   await page.getByRole('button', { name: '公众号账号', exact: true }).click();
   await expect(page.getByRole('heading', { name: '公众号账号', exact: true })).toBeVisible();
 }
@@ -55,8 +58,10 @@ test('错误登录被拒绝，正确登录后的会话 Cookie 受保护，退出
   try {
     await page.getByRole('button', { name: '登录', exact: true }).click();
     expect((await realResponse).status()).toBe(401);
-    await expect(page.getByRole('img', { name: 'loading', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: '登录', exact: true })).toBeVisible({
+    const loginButton = page.getByRole('button', { name: '登录', exact: true });
+    await expect(loginButton).toHaveAttribute('aria-busy', 'true');
+    await expect(loginButton).toBeDisabled();
+    await expect(loginButton).toBeVisible({
       timeout: 3000,
     });
   } catch (error) {
@@ -154,6 +159,7 @@ test.describe('窄屏', () => {
       fullPage: true,
     });
     await page.getByRole('dialog').getByRole('button', { name: '取消', exact: true }).click();
+    await page.getByRole('button', { name: '打开导航', exact: true }).click();
     await expect(page.getByRole('button', { name: '退出登录', exact: true })).toBeVisible();
   });
 });

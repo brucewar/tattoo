@@ -20,6 +20,12 @@
 
 登录或写入失败时，核对 `.env` 的 `APP_ORIGIN` 是否与浏览器实际协议、主机和端口完全一致。改动后重新创建 API 和 Worker，见[局域网与 HTTPS](OPERATIONS.md#局域网与-https)。初始管理员来自第一次启动的配置，之后改 `ADMIN_PASSWORD` 不会覆盖已有密码；忘记密码使用[管理员密码恢复](OPERATIONS.md#管理员密码恢复)。
 
+## 可以修改密码、使用谷歌或微软验证器吗？
+
+`0.1.0-rc.2` 候选版本的 P14 账户安全提供网页改密、可选 TOTP 双重验证、一次性恢复码和退出其他会话，保留单管理员。Google Authenticator 与 Microsoft Authenticator 均按通用二维码配置；每组动态码成功使用后不能重用，连续操作时等待下一组。版本、发布状态与实际验收见[版本说明](RELEASE-NOTES.md)和[P14 验证记录](P14-VERIFICATION.md)。
+
+恢复码只在启用或重新生成时显示，重新生成使旧码全部失效。手机不可用时可用未使用恢复码；两者都丢失则需要明确的部署应急重置。普通密码重置仍保留已启用验证器。群晖 Container Manager 无 SSH 操作步骤见[账户安全](ACCOUNT-SECURITY.md)。
+
 ## 文本能生成，图片却报错；或者模型接口返回 404？
 
 文本与图片分别配置和验证。文本支持 Chat Completions、Responses、Anthropic Messages；图片独立使用 Images Generations，不使用 Responses 的图片工具或 Anthropic 图片接口。

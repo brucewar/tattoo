@@ -15,7 +15,7 @@ services:
       retries: 15
     restart: unless-stopped
   api:
-    image: ${TATTOO_IMAGE:-ghcr.io/brucewar/tattoo:${TATTOO_VERSION:-0.1.0-rc.1}}
+    image: ${TATTOO_IMAGE:-ghcr.io/brucewar/tattoo:${TATTOO_VERSION:-0.1.0-rc.2}}
     ports:
       - '${WEB_PORT:-8080}:3000'
     environment: &application-environment
@@ -46,7 +46,7 @@ services:
       start_period: 15s
     restart: unless-stopped
   worker:
-    image: ${TATTOO_IMAGE:-ghcr.io/brucewar/tattoo:${TATTOO_VERSION:-0.1.0-rc.1}}
+    image: ${TATTOO_IMAGE:-ghcr.io/brucewar/tattoo:${TATTOO_VERSION:-0.1.0-rc.2}}
     command: [node, apps/server/dist/worker.js]
     environment: *application-environment
     volumes:

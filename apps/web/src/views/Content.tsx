@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Empty, Pagination, Spin } from 'antd';
+import { Alert, Button, Empty, Pagination, Spin } from '../components/ui';
+import { FileText, Plus, Sparkle, ArrowUpRight } from '@phosphor-icons/react';
 import type { ArticleSummary } from '@tattoo/contracts';
 import { api, errorMessage } from '../api';
 import { date, type Page } from '../ui';
@@ -62,15 +63,20 @@ export function Content({
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">从一篇好内容开始</p>
           <h1>内容</h1>
-          <p className="secondary">从主题生成图文，或自己写作；保存可以随时回看的修订。</p>
+          <p className="secondary">从一个想法开始，把内容留在自己的工作台。</p>
         </div>
         <div className="heading-actions">
-          <Button type="primary" onClick={() => setCreatingTopic(true)}>
+          <Button
+            type="primary"
+            icon={<Sparkle aria-hidden />}
+            onClick={() => setCreatingTopic(true)}
+          >
             主题创作
           </Button>
-          <Button onClick={() => setSelected(null)}>新建文章</Button>
+          <Button icon={<Plus aria-hidden />} onClick={() => setSelected(null)}>
+            新建文章
+          </Button>
         </div>
       </div>
       {error && (
@@ -86,10 +92,20 @@ export function Content({
         />
       )}
       <div className="surface content-surface">
+        <div className="content-list-header">
+          <span>
+            全部文章 <span className="list-count">{total}</span>
+          </span>
+          <span className="secondary">明确保存 · 修订可追溯</span>
+        </div>
         {loading ? (
           <div className="loading-panel">
             <Spin />
             <p className="secondary">正在读取文章…</p>
+          </div>
+        ) : error && !items.length ? (
+          <div className="loading-panel">
+            <p className="secondary">文章暂时无法显示，请重新加载。</p>
           </div>
         ) : !items.length ? (
           <div className="empty-content">
@@ -98,6 +114,11 @@ export function Content({
           </div>
         ) : (
           <div className="content-list">
+            <div className="list-column-heading content-columns" aria-hidden="true">
+              <span>文章</span>
+              <span>修订</span>
+              <span>操作</span>
+            </div>
             {items.map((item) => (
               <button
                 key={item.id}
@@ -105,12 +126,15 @@ export function Content({
                 className="content-row"
                 onClick={() => setSelected(item.id)}
               >
+                <FileText className="content-file-icon" size={20} aria-hidden />
                 <div>
                   <strong>{item.title}</strong>
                   <span className="secondary">保存于 {date(item.updatedAt)}</span>
                 </div>
                 <span className="revision-pill">v{item.version}</span>
-                <span className="content-open">继续编辑 →</span>
+                <span className="content-open">
+                  继续编辑 <ArrowUpRight size={14} aria-hidden />
+                </span>
               </button>
             ))}
           </div>

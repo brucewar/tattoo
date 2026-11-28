@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
+import { generate, generateSecret } from 'otplib';
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
 let imageRef;
@@ -48,7 +49,22 @@ const adminPassword = randomBytes(24).toString('base64url');
 const accountSecret = 'p5-only-fake-' + randomBytes(24).toString('hex');
 const aiSecret = 'p6-only-fake-' + randomBytes(24).toString('hex');
 const searchSecret = 'p9-only-fake-' + randomBytes(24).toString('hex');
-const secrets = [key, wrongKey, adminPassword, accountSecret, aiSecret, searchSecret];
+const totpSecret = generateSecret({ length: 32 });
+const pendingTotpSecret = generateSecret({ length: 32 });
+const recoveryCode = randomBytes(16).toString('hex');
+const challengeToken = randomBytes(32).toString('hex');
+const secrets = [
+  key,
+  wrongKey,
+  adminPassword,
+  accountSecret,
+  aiSecret,
+  searchSecret,
+  totpSecret,
+  pendingTotpSecret,
+  recoveryCode,
+  challengeToken,
+];
 const cleanupErrors = [];
 let temporaryRoot;
 let directory;
@@ -243,15 +259,43 @@ async function http(stack, path, { method = 'GET', json, binary, cookie, status 
   return response;
 }
 
-async function login(stack) {
-  const response = await http(stack, '/auth/login', {
+async function login(stack, totpSeed) {
+  let response = await http(stack, '/auth/login', {
     method: 'POST',
     json: { email: adminEmail, password: adminPassword },
   });
-  const cookie = response.headers.getSetCookie()[0]?.split(';')[0];
+  let result = await response.json();
+  if (totpSeed) {
+    assert.equal(result.data.mfaRequired, true, '恢复后仍必须完成第二步验证');
+    const challenge = response.headers
+      .getSetCookie()
+      .find((value) => value.startsWith('tattoo_login_challenge='))
+      ?.split(';')[0];
+    assert.ok(challenge);
+    secrets.push(challenge, challenge.slice(challenge.indexOf('=') + 1));
+    // Restore advances the replay boundary to its current step. Use the next
+    // permitted step without sleeping or resetting the restored security state.
+    const code = await generate({
+      secret: totpSeed,
+      algorithm: 'sha1',
+      digits: 6,
+      period: 30,
+      epoch: Math.floor(Date.now() / 1000) + 30,
+    });
+    secrets.push(code);
+    response = await http(stack, '/auth/login/verify', {
+      method: 'POST',
+      json: { code },
+      cookie: challenge,
+    });
+    result = await response.json();
+  } else assert.notEqual(result.data.mfaRequired, true);
+  const cookie = response.headers
+    .getSetCookie()
+    .find((value) => value.startsWith('tattoo_session='))
+    ?.split(';')[0];
   assert.ok(cookie?.startsWith('tattoo_session='));
   secrets.push(cookie, cookie.slice(cookie.indexOf('=') + 1));
-  const result = await response.json();
   assert.equal(result.data.remoteWritesEnabled, false);
   return cookie;
 }
@@ -312,6 +356,18 @@ async function checkRestored(fixture, expectedSessions = 0) {
       try {
         assert.equal(process.env.REMOTE_WRITES_ENABLED, 'false');
         assert.equal(await db.session.count(), ${expectedSessions});
+        const administrator = await db.user.findUniqueOrThrow({ where: { email: fixture.security.email } });
+        const totpPrefix = 'tattoo:totp:v1:' + administrator.id + ':';
+        assert.notEqual(administrator.totpSecretEncrypted, fixture.security.totpSecret);
+        assert.equal(new SecretBox(process.env.APP_ENCRYPTION_KEY).decrypt(administrator.totpSecretEncrypted), totpPrefix + fixture.security.totpSecret);
+        assert.ok(administrator.totpLastStep >= fixture.security.lastStep);
+        assert.ok(administrator.totpLastStep >= fixture.security.restoreStartedStep);
+        assert.equal(administrator.securityVersion, fixture.security.version + 1);
+        for (const field of ['pendingTotpEncrypted', 'pendingTotpExpiresAt', 'pendingTotpSessionHash', 'pendingTotpSetupId', 'factorFailureStartedAt', 'factorBlockedUntil'])
+          assert.equal(administrator[field], null);
+        assert.equal(administrator.factorFailureCount, 0);
+        assert.equal(await db.recoveryCode.count(), 0);
+        assert.equal(await db.loginChallenge.count(), 0);
         const account = await db.account.findUniqueOrThrow({ where: { id: fixture.accountId } });
         assert.equal(new SecretBox(process.env.APP_ENCRYPTION_KEY).decrypt(account.secretEncrypted), fixture.secret);
         const model = await db.aiModel.findUniqueOrThrow({ where: { capability: 'text' } });
@@ -436,6 +492,14 @@ async function checkRestored(fixture, expectedSessions = 0) {
 
 try {
   console.info('本验收要求 Docker 发布端口可由当前管理机通过 127.0.0.1 访问。');
+  temporaryRoot = await realpath(tmpdir());
+  directory = await mkdtemp(join(temporaryRoot, 'tattoo-p5-recovery-'));
+  const configurationEnv = join(directory, 'configuration.env');
+  await writeFile(
+    configurationEnv,
+    `POSTGRES_PASSWORD=${randomBytes(24).toString('hex')}\nAPP_ENCRYPTION_KEY=${key}\n`,
+    { mode: 0o600, flag: 'wx' },
+  );
   const resolved = await run(
     'docker',
     [
@@ -444,6 +508,8 @@ try {
       join(repository, 'compose.yaml'),
       '--file',
       join(repository, 'compose.build.yaml'),
+      '--env-file',
+      configurationEnv,
       'config',
       '--images',
     ],
@@ -463,8 +529,6 @@ try {
   ];
   assert.equal(applications.length, 1, 'API 与 Worker 必须使用同一个应用镜像');
   imageRef = applications[0];
-  temporaryRoot = await realpath(tmpdir());
-  directory = await mkdtemp(join(temporaryRoot, 'tattoo-p5-recovery-'));
   const sourcePort = await port();
   let targetPort = await port();
   while (targetPort === sourcePort) targetPort = await port();
@@ -689,6 +753,20 @@ try {
     articleId: state === 'SUCCEEDED' ? articles[0].id : null,
   }));
   const fixture = {
+    security: {
+      email: adminEmail,
+      totpSecret,
+      pendingTotpSecret,
+      recoveryCode,
+      challengeToken,
+      setupId: randomUUID(),
+      sessionHash: createHash('sha256')
+        .update(sourceCookie.slice(sourceCookie.indexOf('=') + 1))
+        .digest('hex'),
+      version: 7,
+      lastStep: Math.floor(Date.now() / 30000) - 2,
+      restoreStartedStep: 0,
+    },
     accountId: account.id,
     secret: accountSecret,
     aiSecret,
@@ -718,6 +796,7 @@ try {
       import { createHash, randomUUID } from 'node:crypto';
       import { PrismaClient } from '@prisma/client';
       import { RENDER_VERSION } from './apps/server/dist/platforms/wechat/renderer.js';
+      import { SecretBox } from './apps/server/dist/security.js';
       const fixture = ${JSON.stringify(fixture)};
       const db = new PrismaClient();
       try {
@@ -800,6 +879,30 @@ try {
           { accountId: fixture.accountId, assetId: fixture.assetId, kind: 'BODY', url: 'https://mmbiz.qpic.cn/p5-recovery.jpg' },
         ] });
         if (await db.session.count() !== 1) throw new Error('source session fixture missing');
+        const administrator = await db.user.findUniqueOrThrow({ where: { email: fixture.security.email } });
+        const box = new SecretBox(process.env.APP_ENCRYPTION_KEY);
+        const totpPrefix = 'tattoo:totp:v1:' + administrator.id + ':';
+        await db.user.update({ where: { id: administrator.id }, data: {
+          securityVersion: fixture.security.version,
+          totpSecretEncrypted: box.encrypt(totpPrefix + fixture.security.totpSecret),
+          totpLastStep: fixture.security.lastStep,
+          pendingTotpEncrypted: box.encrypt(totpPrefix + fixture.security.pendingTotpSecret),
+          pendingTotpExpiresAt: new Date(Date.now() + 600000),
+          pendingTotpSessionHash: fixture.security.sessionHash,
+          pendingTotpSetupId: fixture.security.setupId,
+          factorFailureCount: 7,
+          factorFailureStartedAt: new Date(),
+          factorBlockedUntil: new Date(Date.now() + 300000),
+        } });
+        await db.recoveryCode.create({ data: {
+          userId: administrator.id,
+          codeHash: createHash('sha256').update('tattoo:recovery:v1:' + administrator.id + ':' + fixture.security.recoveryCode).digest('hex'),
+        } });
+        await db.loginChallenge.create({ data: {
+          id: createHash('sha256').update(fixture.security.challengeToken).digest('hex'),
+          userId: administrator.id, securityVersion: fixture.security.version,
+          expiresAt: new Date(Date.now() + 300000), attempts: 2,
+        } });
         console.log('SOURCE_FIXTURES_READY');
       } finally { await db.$disconnect(); }
     `,
@@ -862,19 +965,30 @@ try {
   );
   console.info('PASS: 错误主密钥、启用远程写入和损坏备份均在创建目标数据前被拒绝');
 
+  fixture.security.restoreStartedStep = Math.floor(Date.now() / 30000);
   await restoreCommand(backupDirectory);
   assert.deepEqual(await runningServices(target), ['postgres']);
   const restored = await checkRestored(fixture);
   assert.notEqual((await restoreCommand(backupDirectory, target.envFile, true)).code, 0);
   assert.deepEqual(await checkRestored(fixture), restored);
   console.info(
-    'PASS: 空实例恢复后公众号、模型及搜索密钥可解密，会话撤销，图文/资料/订阅/快照完整，旧投递、生成、搜索和主题任务冻结；拒绝覆盖非空目标',
+    'PASS: 空实例恢复后公众号、模型、搜索与2FA密钥可解密，会话/挑战/恢复码/待绑定失效且OTP防重放边界推进，图文/资料/订阅/快照完整，旧任务冻结；拒绝覆盖非空目标',
   );
 
   await compose(target, ['up', '-d', '--wait', '--wait-timeout', '180', 'api']);
   assert.deepEqual(await runningServices(target), ['api', 'postgres']);
   await (await http(target, '/auth/me', { cookie: sourceCookie, status: 401 })).arrayBuffer();
-  const targetCookie = await login(target);
+  const targetCookie = await login(target, totpSecret);
+  const securityText = await (
+    await http(target, '/auth/security', { cookie: targetCookie })
+  ).text();
+  for (const secret of [totpSecret, pendingTotpSecret, recoveryCode, challengeToken])
+    assert.ok(!securityText.includes(secret));
+  assert.deepEqual(JSON.parse(securityText).data, {
+    totpEnabled: true,
+    recoveryCodesRemaining: 0,
+    otherSessionsCount: 0,
+  });
   const me = await (await http(target, '/auth/me', { cookie: targetCookie })).json();
   assert.equal(me.data.remoteWritesEnabled, false);
   const restoredModelsText = await (

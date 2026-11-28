@@ -27,7 +27,7 @@ async function main() {
   );
   app.useGlobalFilters(new PublicErrorFilter());
   app.enableShutdownHooks();
-  await app.listen(config.PORT, '0.0.0.0');
+  await app.listen(config.PORT, config.TEST_BIND_LOOPBACK ? '127.0.0.1' : '0.0.0.0');
   console.info('Tattoo API 已启动');
 }
 

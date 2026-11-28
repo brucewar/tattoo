@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Form, Input, Modal, Pagination, Spin } from 'antd';
+import { Alert, Button, Input, Modal, Pagination, Spin } from '../components/ui';
 import type { Account } from '@tattoo/contracts';
 import { api, errorMessage, jsonRequest } from '../api';
 import { Capability, type Page } from '../ui';
@@ -16,7 +16,38 @@ function AccountEditor({
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const [values, setValues] = useState({
+    name: account?.name ?? '',
+    appId: account?.appId ?? '',
+    appSecret: '',
+  });
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof typeof values, string>>>({});
+  const fieldIds = {
+    name: 'account-name-field',
+    appId: 'account-app-id',
+    appSecret: 'account-app-secret',
+  };
+  function change(field: keyof typeof values, value: string) {
+    setValues((current) => ({ ...current, [field]: value }));
+    setFieldErrors((current) => ({ ...current, [field]: undefined }));
+  }
+  function invalid(field: keyof typeof values, message: string) {
+    setError('');
+    setFieldErrors({ [field]: message });
+    requestAnimationFrame(() => document.getElementById(fieldIds[field])?.focus());
+  }
   async function save(values: { name: string; appId: string; appSecret?: string }) {
+    if (pending) return;
+    if (!values.name.trim()) {
+      invalid('name', '请输入账号名称');
+      return;
+    }
+    const secret = values.appSecret?.trim() ?? '';
+    if ((!account && !secret) || (secret && (secret.length < 16 || secret.length > 128))) {
+      invalid('appSecret', secret ? 'AppSecret 长度应为 16–128 个字符' : '请输入 AppSecret');
+      return;
+    }
+    setFieldErrors({});
     setPending(true);
     setError('');
     try {
@@ -49,62 +80,80 @@ function AccountEditor({
     >
       <p className="secondary">凭证由后端加密保存，保存后不会返回 AppSecret 明文。</p>
       {error && <Alert type="error" showIcon message={error} />}
-      <Form
-        layout="vertical"
-        onFinish={save}
-        initialValues={{ name: account?.name ?? '', appId: account?.appId ?? '', appSecret: '' }}
-        requiredMark={false}
-        preserve={false}
+      <form
+        className="workspace-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void save(values);
+        }}
       >
-        <Form.Item
-          label="账号名称"
-          name="name"
-          rules={[
-            { required: true, whitespace: true, message: '请输入账号名称' },
-            { max: 60, message: '账号名称最多 60 个字符' },
-          ]}
-        >
-          <Input placeholder="例如：我的公众号" autoComplete="off" maxLength={60} />
-        </Form.Item>
-        <Form.Item
-          label="AppID"
-          name="appId"
-          extra={
-            account
-              ? '创建后不能修改 AppID；请新增账号来接入其他公众号。'
-              : '请填写微信开发者平台中的公众号 AppID。'
-          }
-          rules={[
-            { required: true, message: '请输入 AppID' },
-            { pattern: /^wx[a-zA-Z0-9]{8,40}$/, message: '请输入有效的公众号 AppID' },
-          ]}
-        >
-          <Input disabled={Boolean(account)} autoComplete="off" placeholder="wx…" />
-        </Form.Item>
-        <Form.Item
-          label={account ? '轮换 AppSecret（可选）' : 'AppSecret'}
-          name="appSecret"
-          extra={
-            account
-              ? '留空保留现有密钥。轮换后需要重新验证接口能力。'
-              : '只在自己的实例中填写，不要提交到代码仓库。'
-          }
-          rules={[
-            { required: !account, message: '请输入 AppSecret' },
-            {
-              validator: (_, value: string | undefined) =>
-                !value || (value.trim().length >= 16 && value.trim().length <= 128)
-                  ? Promise.resolve()
-                  : Promise.reject(new Error('AppSecret 长度应为 16–128 个字符')),
-            },
-          ]}
-        >
-          <Input.Password
-            autoComplete="new-password"
-            placeholder={account ? '留空表示保留现有密钥' : '请输入 AppSecret'}
-            maxLength={128}
-          />
-        </Form.Item>
+        <fieldset className="form-fields" disabled={pending}>
+          <div className="form-field">
+            <label htmlFor="account-name-field">账号名称</label>
+            <Input
+              id="account-name-field"
+              required
+              placeholder="例如：我的公众号"
+              autoComplete="off"
+              maxLength={60}
+              value={values.name}
+              aria-invalid={Boolean(fieldErrors.name) || undefined}
+              aria-describedby={fieldErrors.name ? 'account-name-error' : undefined}
+              onChange={(event) => change('name', event.target.value)}
+            />
+            {fieldErrors.name && (
+              <p id="account-name-error" className="inline-error" role="alert">
+                {fieldErrors.name}
+              </p>
+            )}
+          </div>
+          <div className="form-field">
+            <label htmlFor="account-app-id">AppID</label>
+            <Input
+              id="account-app-id"
+              required
+              pattern="wx[a-zA-Z0-9]{8,40}"
+              title="请输入以 wx 开头的公众号 AppID"
+              disabled={Boolean(account)}
+              autoComplete="off"
+              placeholder="wx…"
+              value={values.appId}
+              aria-describedby="account-app-id-help"
+              onChange={(event) => change('appId', event.target.value)}
+            />
+            <p className="form-note" id="account-app-id-help">
+              {account
+                ? '创建后不能修改 AppID；请新增账号来接入其他公众号。'
+                : '请填写微信开发者平台中的公众号 AppID。'}
+            </p>
+          </div>
+          <div className="form-field">
+            <label htmlFor="account-app-secret">
+              {account ? '轮换 AppSecret（可选）' : 'AppSecret'}
+            </label>
+            <Input.Password
+              id="account-app-secret"
+              required={!account}
+              autoComplete="new-password"
+              placeholder={account ? '留空表示保留现有密钥' : '请输入 AppSecret'}
+              maxLength={128}
+              value={values.appSecret}
+              aria-invalid={Boolean(fieldErrors.appSecret) || undefined}
+              aria-describedby={`account-app-secret-help${fieldErrors.appSecret ? ' account-app-secret-error' : ''}`}
+              onChange={(event) => change('appSecret', event.target.value)}
+            />
+            {fieldErrors.appSecret && (
+              <p id="account-app-secret-error" className="inline-error" role="alert">
+                {fieldErrors.appSecret}
+              </p>
+            )}
+            <p className="form-note" id="account-app-secret-help">
+              {account
+                ? '留空保留现有密钥。轮换后需要重新验证接口能力。'
+                : '只在自己的实例中填写，不要提交到代码仓库。'}
+            </p>
+          </div>
+        </fieldset>
         <div className="modal-actions">
           <Button onClick={onClose} disabled={pending}>
             取消
@@ -113,7 +162,7 @@ function AccountEditor({
             {account ? '保存配置' : '保存公众号'}
           </Button>
         </div>
-      </Form>
+      </form>
     </Modal>
   );
 }
@@ -194,9 +243,8 @@ export function Accounts({
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">连接你的内容目的地</p>
           <h1>公众号账号</h1>
-          <p className="secondary">把凭证留在自己的实例里，先验证，再存入草稿箱。</p>
+          <p className="secondary">管理公众号连接，验证权限后存入微信草稿箱。</p>
         </div>
         <Button
           type="primary"
@@ -217,7 +265,18 @@ export function Accounts({
           description="可以保存账号并执行只读验证。创建测试草稿前，请由部署管理员启用远程写入。"
         />
       )}
-      {error && <Alert type="error" showIcon message={error} />}
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          message={error}
+          action={
+            <Button onClick={reload} loading={loading} aria-label="重新加载公众号账号">
+              重新加载
+            </Button>
+          }
+        />
+      )}
       {verificationError && <Alert type="error" showIcon message={verificationError} />}
       {notice && (
         <Alert type="success" showIcon message={notice} closable onClose={() => setNotice('')} />
@@ -227,7 +286,7 @@ export function Accounts({
           <Spin />
           <p className="secondary">正在读取公众号配置…</p>
         </div>
-      ) : accounts.length === 0 ? (
+      ) : error && accounts.length === 0 ? null : accounts.length === 0 ? (
         <div className="surface empty-accounts">
           <span className="empty-letter">T.</span>
           <h2>接入第一个公众号</h2>

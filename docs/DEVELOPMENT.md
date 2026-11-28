@@ -22,6 +22,12 @@ npm run dev
 
 开发覆盖文件只把 PostgreSQL 映射到宿主环回地址的 55433 端口，不用于 NAS 正式部署。
 
+## 前端组件与外观
+
+工作台采用 React、TypeScript、项目内维护的 shadcn/ui 组件、Tailwind 和 Tiptap。基础控件与应用封装集中维护，不重新引入 Ant Design 或另一套全局主题。管理页保持紧凑的信息层级，文章正文保持适合阅读的宽度；新增控件需同时检查浅色、深色、键盘和窄屏状态。
+
+“外观主题”提供浅色、深色和跟随系统，偏好只保存在当前浏览器的 `tattoo:theme`，不写入服务器配置或数据库。默认跟随系统，存储不可用时仍可继续使用。根主题在应用挂载前通过同源外部脚本初始化，不放宽 `script-src 'self'`。微信预览的浅色阅读画布独立于工作台主题，不随切换修改文章或导出排版。详细变更依据见 [OpenSpec 设计](../openspec/changes/redesign-workspace/design.md)。
+
 ## 独立数据库集成测试
 
 ```bash
@@ -32,14 +38,19 @@ docker compose -f compose.test.yaml up -d --wait
 
 测试完成后运行 `docker compose -f compose.test.yaml down`。测试库使用 tmpfs，容器删除即丢弃测试数据；主应用的持久卷不会受影响。
 
+真实 API 测试使用 `TEST_BIND_LOOPBACK=true` 将测试进程限制为 `127.0.0.1`。该选项默认关闭，仅允许 `NODE_ENV=test`，其他环境启用会拒绝启动；Docker 和正式部署继续使用默认监听方式。也可在隔离原生 PostgreSQL 上执行集成测试，但仍须使用专用测试库与随机 schema，并分别记录数据库回归和 Docker 部署结果。
+
 ## Docker 部署骨架
 
 ```bash
 npm run setup
+export TATTOO_IMAGE=tattoo-app:local
 docker compose -f compose.yaml -f compose.build.yaml config --quiet
 docker compose -f compose.yaml -f compose.build.yaml build api
 docker compose -f compose.yaml -f compose.build.yaml up -d --no-build --remove-orphans --wait
 ```
+
+PowerShell 将上面的 `export` 改为 `$env:TATTOO_IMAGE = 'tattoo-app:local'`。构建、部署与后续两个隔离验证脚本应使用相同的本地镜像引用，不依赖配置生成器中的发布版本标签。
 
 配置文件已存在时跳过 `setup`。默认访问 `http://localhost:8080`；局域网访问需将 `.env` 的 `APP_ORIGIN` 改为实际访问来源，包括端口。前端构建包含在单一应用镜像内，由 API 提供；API 与 Worker 共享镜像，只有 API 对宿主开放 Web 端口。Compose 共 API、Worker、PostgreSQL 三个容器。API 在启动前执行 `prisma migrate deploy`，失败则不启动 HTTP 服务；Worker 等待 API 就绪后启动。数据库与图片使用命名卷。
 
@@ -47,7 +58,7 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --no-build --remove-o
 
 当前已实现登录、账号设置、只读接口验证、固定测试草稿，以及文章编辑、修订、预览和普通文章草稿投递。模拟服务通过仍不能解释为真实微信权限通过。应用会固定读取仓库根目录的 `.env`，相对素材路径也以仓库根目录解析，因此从 workspace 启动 API/Worker 时与 Docker 的配置规则一致。
 
-镜像构建完成后，可运行 `node scripts/verify-foundation.mjs` 执行隔离部署验证。它使用固定的 `tattoo-p1-smoke` Compose 项目和 18080 端口，验证健康检查、启动失败门槛、Worker 互斥和容器重建持久化；结束后停止测试容器，保留隔离测试卷用于排查。不要将该项目名用于真实部署。
+镜像构建完成后，在同一终端保留 `TATTOO_IMAGE` 再运行 `node scripts/verify-foundation.mjs` 执行隔离部署验证；脚本默认镜像为 `tattoo-app:local`，必须与实际构建引用一致。它创建随机 Compose 项目和环回端口，使用临时配置及合成凭据，不读取仓库根 `.env`，验证健康检查、启动失败门槛、Worker 互斥和容器重建持久化。结束后只清理本次自有容器、卷与临时目录，不保留测试卷，也不操作已有部署。
 
 ## 登录与公众号接入
 
@@ -99,7 +110,7 @@ docker compose -f compose.yaml -f compose.build.yaml exec -T -e TATTOO_NEW_PASSW
 Remove-Item Env:TATTOO_NEW_PASSWORD
 ```
 
-重置会原子撤销全部旧会话；重复启动不会把密码改回初始配置。本地源码方式先构建后执行 `node scripts/reset-admin.mjs`，同样从环境变量读取新密码。
+重置会原子撤销全部旧会话，并保留已启用的 TOTP；重复启动不会把密码改回初始配置。本地源码方式先构建后执行 `node scripts/reset-admin.mjs`，同样从环境变量读取新密码。网页改密、恢复码和明确移除 2FA 的部署应急操作见[账户安全](ACCOUNT-SECURITY.md)，其中包含无需 SSH 的群晖 Container Manager 终端步骤。
 
 ## 浏览器验证
 
@@ -109,8 +120,10 @@ Remove-Item Env:TATTOO_NEW_PASSWORD
 
 本轮浏览器入口包含 P6 AI 配置、生成、改写和配图；模型与微信均由隔离的 HTTP 模拟服务提供，不使用真实密钥。完整执行 `node tests/e2e/run-p2.mjs`；定点联调可把 Playwright 文件过滤器传给该脚本，例如 `node tests/e2e/run-p2.mjs p2.spec.ts p6-ai.spec.ts`，同时保留基础草稿防重放与 AI 调用审计。模型接口及操作说明见 [模型配置与 AI 创作](MODELS.md)。
 
+`tests/e2e/workspace-ui.spec.ts` 使用拦截 API 的离线 fixtures 检查三种外观、刷新记忆、系统变化、存储降级、编辑保护、快捷保存、弹窗键盘、会话恢复、独立微信预览和 390px 布局。它与 `article-digest.spec.ts` 一样需要 `TATTOO_E2E_TEST_MODE=1`；在独立前端服务器上运行时，另设置 `TATTOO_E2E_BASE_URL` 指向该服务。这些用例不调用真实模型、搜索或微信，不能替代真实 API/Worker 流程的回归或平台验收。
+
 ## 持久化与后续恢复
 
 源码重建使用 `docker compose -f compose.yaml -f compose.build.yaml up -d --build --remove-orphans`，不要添加 `down -v`。备份应包含一致的 PostgreSQL 导出和素材卷，主密钥独立保存；已提供 `node scripts/backup.mjs` 与 `node scripts/restore.mjs`。源码部署的备份/恢复命令均添加 `--compose-file compose.yaml --compose-file compose.build.yaml`，按顺序使用同一组配置；管理电脑通过当前 Docker context 操作目标容器，数据库与素材采用同一次停机备份。具体参数、主密钥和匹配镜像保管、空实例恢复及旧任务核对见 [运维说明](OPERATIONS.md)。恢复实例先保持 `REMOTE_WRITES_ENABLED=false`，核对旧任务后再显式启用。此开关不代表微信账号已具备写权限。
 
-恢复工具的独立容器验收入口为 `npm run verify:recovery`，需要已构建的应用镜像和可在管理电脑环回地址访问的 Docker 发布端口。它只创建随机隔离项目并在结束后删除自身容器和卷，不操作日常部署；历史四服务结果见 [P5 验证记录](P5-VERIFICATION.md)，单镜像结构以本轮新记录为准。
+恢复工具的独立容器验收入口为 `npm run verify:recovery`，需要已构建的应用镜像和可在管理电脑环回地址访问的 Docker 发布端口；沿用与构建及基础验收一致的 `TATTOO_IMAGE`。它使用临时配置，只创建随机隔离项目并在结束后删除自身容器、卷与临时目录，不读取仓库根 `.env` 或操作日常部署；历史四服务结果见 [P5 验证记录](P5-VERIFICATION.md)，本轮单镜像与 TOTP 恢复结果见 [P14 验证记录](P14-VERIFICATION.md)。

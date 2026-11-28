@@ -1,4 +1,22 @@
-import { Tooltip } from 'antd';
+import { Button, Tooltip } from '../ui';
+import {
+  ArrowCounterClockwise,
+  ArrowClockwise,
+  ArrowElbowDownLeft,
+  Code,
+  CodeBlock,
+  ImageSquare,
+  LinkSimple,
+  ListBullets,
+  ListNumbers,
+  Minus,
+  Quotes,
+  TextB,
+  TextItalic,
+  TextStrikethrough,
+  TextUnderline,
+} from '@phosphor-icons/react';
+import type { ReactNode } from 'react';
 import type { Editor } from '@tiptap/react';
 
 export function ArticleToolbar({
@@ -12,7 +30,13 @@ export function ArticleToolbar({
   onImage: () => void;
   onLink: () => void;
 }) {
-  const buttons: { label: string; text: string; active?: boolean; run: () => void }[] = [
+  const buttons: {
+    label: string;
+    text: string;
+    active?: boolean;
+    available?: boolean;
+    run: () => void;
+  }[] = [
     {
       label: '正文段落',
       text: '正文',
@@ -128,6 +152,7 @@ export function ArticleToolbar({
     {
       label: '撤销',
       text: '撤销',
+      available: editor?.can().undo(),
       run: () => {
         editor?.chain().focus().undo().run();
       },
@@ -135,26 +160,45 @@ export function ArticleToolbar({
     {
       label: '重做',
       text: '重做',
+      available: editor?.can().redo(),
       run: () => {
         editor?.chain().focus().redo().run();
       },
     },
   ];
+  const icons: Record<string, ReactNode> = {
+    加粗: <TextB />,
+    斜体: <TextItalic />,
+    删除线: <TextStrikethrough />,
+    下划线: <TextUnderline />,
+    无序列表: <ListBullets />,
+    有序列表: <ListNumbers />,
+    引用: <Quotes />,
+    行内代码: <Code />,
+    代码块: <CodeBlock />,
+    分隔线: <Minus />,
+    换行: <ArrowElbowDownLeft />,
+    正文链接: <LinkSimple />,
+    正文图片: <ImageSquare />,
+    撤销: <ArrowCounterClockwise />,
+    重做: <ArrowClockwise />,
+  };
   return (
     <div className="editor-toolbar" role="group" aria-label="正文格式工具">
-      {buttons.map((button) => (
+      {buttons.map((button, index) => (
         <Tooltip title={button.label} key={button.label}>
-          <button
-            type="button"
+          <Button
+            type="text"
+            size="small"
             aria-label={button.label}
             aria-pressed={button.active}
-            disabled={disabled || !editor}
-            className={button.active ? 'is-active' : ''}
+            disabled={disabled || !editor || button.available === false}
+            className={`format-button${button.active ? ' is-active' : ''}${[3, 7, 9, 14, 16].includes(index) ? ' starts-group' : ''}`}
             onMouseDown={(event) => event.preventDefault()}
             onClick={button.run}
           >
-            {button.text}
-          </button>
+            {icons[button.label] ?? button.text}
+          </Button>
         </Tooltip>
       ))}
     </div>

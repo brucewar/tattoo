@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Tag } from 'antd';
+import { Tag } from '../ui';
 import type { SourceJob, SourceJobState as JobState } from '@tattoo/contracts';
 import { api, errorMessage } from '../../api';
 

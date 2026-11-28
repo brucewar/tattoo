@@ -63,7 +63,10 @@ async function save(page: Page): Promise<Article> {
   expect(result.ok(), await result.text()).toBe(true);
   const article = (await result.json()).data as Article;
   await expect(page.getByRole('status')).toHaveText(`已保存 · 修订 v${article.version}`);
-  await expect(page.getByRole('alert')).toContainText(`已保存为修订 v${article.version}。`);
+  const savedMessage = `已保存为修订 v${article.version}。`;
+  const savedNotice = page.getByRole('note').filter({ hasText: savedMessage });
+  await expect(savedNotice).toHaveText(savedMessage);
+  await expect(savedNotice).toHaveAttribute('aria-live', 'polite');
   await expect(page.getByRole('button', { name: '保存文章', exact: true })).toBeEnabled();
   return article;
 }

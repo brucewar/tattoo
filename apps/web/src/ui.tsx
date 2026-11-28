@@ -1,4 +1,4 @@
-import { Tag } from 'antd';
+import { Tag } from './components/ui';
 import type { CapabilityCheck, DeliveryState } from '@tattoo/contracts';
 
 export type User = { id: string; email: string; remoteWritesEnabled?: boolean };

@@ -8,6 +8,15 @@ const valid = {
 };
 
 describe('部署配置', () => {
+  it('隔离 HTTP 测试可显式只监听环回，生产与默认容器监听保持不变', () => {
+    expect(loadConfig(valid).TEST_BIND_LOOPBACK).toBe(false);
+    expect(
+      loadConfig({ ...valid, NODE_ENV: 'test', TEST_BIND_LOOPBACK: 'true' }).TEST_BIND_LOOPBACK,
+    ).toBe(true);
+    expect(() =>
+      loadConfig({ ...valid, NODE_ENV: 'production', TEST_BIND_LOOPBACK: 'true' }),
+    ).toThrow('TEST_BIND_LOOPBACK');
+  });
   it('资料抓取测试例外只允许 test 环境的精确 HTTP 环回来源', () => {
     expect(
       loadConfig({ ...valid, NODE_ENV: 'test', SOURCES_TEST_ORIGIN: 'http://127.0.0.1:8099' })

@@ -4,19 +4,21 @@
 
 使用 Docker Compose 拉取镜像即可运行 Tattoo，宿主机不需要 Node.js、npm 或源码。以下步骤适用于支持 Linux 容器的 Docker 主机，包括 NAS；首次配置通过应用镜像生成。
 
+本页适用于 `0.1.0-rc.2` 候选版本。发布状态、源码关联与准确镜像 digest 见[对应标签流水线](https://github.com/brucewar/tattoo/actions?query=branch%3Av0.1.0-rc.2)，版本差异见[版本说明](RELEASE-NOTES.md)。
+
 ## 部署前确认
 
 | 项目           | 当前支持情况                                                                                                         |
 | -------------- | -------------------------------------------------------------------------------------------------------------------- |
-| 发布版本       | `0.1.0-rc.1`，候选版                                                                                                 |
-| 应用镜像       | `ghcr.io/brucewar/tattoo:0.1.0-rc.1`，可匿名拉取                                                                     |
-| CPU / 容器平台 | 已发布并验证 `linux/amd64`（x86-64）；当前没有 ARM 镜像                                                              |
+| 发布版本       | `0.1.0-rc.2`，候选版                                                                                                 |
+| 应用镜像       | `ghcr.io/brucewar/tattoo:0.1.0-rc.2`                                                                                 |
+| CPU / 容器平台 | 目标平台 `linux/amd64`（x86-64）；当前没有 ARM 镜像                                                                  |
 | 容器环境       | Docker Engine 与 Docker Compose v2，需支持下文的 `--wait`、`--wait-timeout` 参数；Docker Desktop 使用 Linux 容器模式 |
 | Web 端口       | 默认 `8080`，可修改                                                                                                  |
 | 持久数据       | PostgreSQL 数据库和图片素材分别保存在 Docker 命名卷中                                                                |
 | 运行服务       | `api`、`worker`、`postgres` 三个容器；API 与 Worker 共用一个 Tattoo 镜像                                             |
 
-不限定 NAS 品牌或型号；请先确认 CPU 架构和容器环境。当前版本的部署与本地自动验收已完成，真实模型、Tavily 和微信接口仍需使用自己的配置验证。
+不限定 NAS 品牌或型号；请先确认 CPU 架构和容器环境。本候选版本的 Docker 与发布验证按[验收记录](P14-VERIFICATION.md)更新，真实模型、Tavily 和微信接口仍需使用自己的配置验证。
 
 选择一个长期保留的部署目录，下面的 `compose.yaml` 和 `.env` 都保存在其中。部署时需能访问 GHCR、Docker Hub 和 GitHub 原始文件地址。
 
@@ -32,9 +34,9 @@
 ```bash
 mkdir tattoo
 cd tattoo
-curl -fL https://raw.githubusercontent.com/brucewar/tattoo/v0.1.0-rc.1/compose.yaml -o compose.yaml
-docker pull ghcr.io/brucewar/tattoo:0.1.0-rc.1
-docker run --rm --user "$(id -u):$(id -g)" --mount "type=bind,source=$(pwd),target=/config" ghcr.io/brucewar/tattoo:0.1.0-rc.1 node scripts/configure.mjs --output /config/.env
+curl -fL https://raw.githubusercontent.com/brucewar/tattoo/v0.1.0-rc.2/compose.yaml -o compose.yaml
+docker pull ghcr.io/brucewar/tattoo:0.1.0-rc.2
+docker run --rm --user "$(id -u):$(id -g)" --mount "type=bind,source=$(pwd),target=/config" ghcr.io/brucewar/tattoo:0.1.0-rc.2 node scripts/configure.mjs --output /config/.env
 ```
 
 配置以当前用户身份写入，避免生成只有其他用户可读的文件。若通过远程 Docker context 操作主机，绑定目录必须在 Docker 主机上可见；最直接的方式是在主机终端完成这一步。
@@ -49,12 +51,12 @@ docker run --rm --user "$(id -u):$(id -g)" --mount "type=bind,source=$(pwd),targ
 ```powershell
 New-Item -ItemType Directory -Path tattoo
 Set-Location tattoo
-docker pull ghcr.io/brucewar/tattoo:0.1.0-rc.1
-docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/config" ghcr.io/brucewar/tattoo:0.1.0-rc.1 node --input-type=module -e "import { writeFile } from 'node:fs/promises'; const response = await fetch('https://raw.githubusercontent.com/brucewar/tattoo/v0.1.0-rc.1/compose.yaml'); if (!response.ok) throw new Error('Compose download failed: ' + response.status); await writeFile('/config/compose.yaml', await response.text(), { flag: 'wx' });"
-docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/config" ghcr.io/brucewar/tattoo:0.1.0-rc.1 node scripts/configure.mjs --output /config/.env
+docker pull ghcr.io/brucewar/tattoo:0.1.0-rc.2
+docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/config" ghcr.io/brucewar/tattoo:0.1.0-rc.2 node --input-type=module -e "import { writeFile } from 'node:fs/promises'; const response = await fetch('https://raw.githubusercontent.com/brucewar/tattoo/v0.1.0-rc.2/compose.yaml'); if (!response.ok) throw new Error('Compose download failed: ' + response.status); await writeFile('/config/compose.yaml', await response.text(), { flag: 'wx' });"
+docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/config" ghcr.io/brucewar/tattoo:0.1.0-rc.2 node scripts/configure.mjs --output /config/.env
 ```
 
-该方式通过应用镜像内的 Node.js 下载 Compose，正常校验 HTTPS 证书，不依赖宿主 Node.js 或 PowerShell 的证书链环境。也可从[固定版本的 Compose](https://raw.githubusercontent.com/brucewar/tattoo/v0.1.0-rc.1/compose.yaml) 手动保存文件，再执行最后一条配置命令。
+该方式通过应用镜像内的 Node.js 下载 Compose，正常校验 HTTPS 证书，不依赖宿主 Node.js 或 PowerShell 的证书链环境。也可从[固定版本的 Compose](https://raw.githubusercontent.com/brucewar/tattoo/v0.1.0-rc.2/compose.yaml) 手动保存文件，再执行最后一条配置命令。
 
 </details>
 
@@ -72,7 +74,7 @@ docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/config"
 
 | 配置                             | 首次部署如何处理                             |
 | -------------------------------- | -------------------------------------------- |
-| `TATTOO_VERSION=0.1.0-rc.1`      | 保持固定候选版本                             |
+| `TATTOO_VERSION=0.1.0-rc.2`      | 保持固定候选版本                             |
 | `APP_ORIGIN`                     | 改成上面确定的浏览器访问来源                 |
 | `WEB_PORT=8080`                  | 未被占用时保留；占用时换一个端口             |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | 用于首次登录；密码已随机生成，可在启动前修改 |
@@ -123,12 +125,12 @@ TATTOO_IMAGE=ghcr.io/brucewar/tattoo@sha256:<发布摘要中的完整摘要值>
 
 ## 自动构建与版本
 
-| 标签                    | 用途                                           |
-| ----------------------- | ---------------------------------------------- |
-| `0.1.0-rc.1` 等固定版本 | 个人部署优先使用，明确选择升级时机             |
-| `sha-<40位提交哈希>`    | 定位通过 CI 的具体提交                         |
-| `edge`                  | 主分支持续更新的开发版本                       |
-| `latest`                | 正式版本发布成功才更新；当前候选版不提供该标签 |
+| 标签                    | 用途                                    |
+| ----------------------- | --------------------------------------- |
+| `0.1.0-rc.2` 等固定版本 | 个人部署优先使用，明确选择升级时机      |
+| `sha-<40位提交哈希>`    | 定位通过 CI 的具体提交                  |
+| `edge`                  | 主分支持续更新的开发版本                |
+| `latest`                | 正式版本发布成功才更新；RC 不更新此标签 |
 
 主分支通过 CI 后自动发布 `edge` 与提交标签。推送 `vX.Y.Z` 或预发布标签时，验证对应提交后发布去掉 `v` 的版本；已有版本/提交产物不会被其他提交覆盖，重试复用核对过的同一提交镜像。移动标签在镜像拉取及部署验收通过后更新。
 

@@ -22,6 +22,7 @@ LABEL org.opencontainers.image.title="Tattoo" \
 COPY --from=production-dependencies /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/LICENSE ./LICENSE
+COPY --from=build /app/apps/web/src/components/ui/LICENSE ./licenses/shadcn-ui.txt
 COPY --from=build /app/apps/server ./apps/server
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 COPY --from=build /app/packages/contracts ./packages/contracts

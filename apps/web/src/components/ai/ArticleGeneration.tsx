@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Input, Modal, Radio } from 'antd';
+import { Alert, Button, Input, Modal, Radio } from '../ui';
 import type { Editor } from '@tiptap/react';
 import type {
   AiGenerationInput,

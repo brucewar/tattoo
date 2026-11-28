@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Checkbox, Empty, Input, Pagination, Spin, Tag } from 'antd';
+import { Alert, Button, Checkbox, Empty, Input, Pagination, Spin, Tag } from '../ui';
 import type { SourceSummary } from '@tattoo/contracts';
 import { api, errorMessage } from '../../api';
 import type { Page } from '../../ui';

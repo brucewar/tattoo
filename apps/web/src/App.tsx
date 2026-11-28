@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Modal, Spin } from 'antd';
+import { Alert, Button, Modal, Spin } from './components/ui';
+import {
+  Files,
+  Broadcast,
+  Books,
+  SlidersHorizontal,
+  ClockCounterClockwise,
+  List,
+  SignOut,
+  CaretRight,
+  ShieldCheck,
+} from '@phosphor-icons/react';
+import { ThemePicker } from './theme';
 import { api, ApiError, errorMessage } from './api';
 import { Brand, type User } from './ui';
 import { Login } from './views/Login';
@@ -8,8 +20,17 @@ import { Records } from './views/Records';
 import { Content } from './views/Content';
 import { Models } from './views/Models';
 import { Sources } from './views/Sources';
+import { Security } from './views/Security';
 
-type Section = 'content' | 'accounts' | 'records' | 'models' | 'sources';
+type Section = 'content' | 'accounts' | 'records' | 'models' | 'sources' | 'security';
+const sections = [
+  { id: 'content', label: '内容', icon: Files },
+  { id: 'sources', label: '资料', icon: Books },
+  { id: 'records', label: '投递记录', icon: ClockCounterClockwise },
+  { id: 'accounts', label: '公众号账号', icon: Broadcast },
+  { id: 'models', label: '模型配置', icon: SlidersHorizontal },
+  { id: 'security', label: '账户安全', icon: ShieldCheck },
+] as const;
 
 export function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
@@ -19,8 +40,10 @@ export function App() {
   const [contentDirty, setContentDirty] = useState(false);
   const [modelsDirty, setModelsDirty] = useState(false);
   const [sourcesDirty, setSourcesDirty] = useState(false);
+  const [securityDirty, setSecurityDirty] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
   const loadSession = useCallback(async () => {
     setBootError('');
     try {
@@ -47,13 +70,15 @@ export function App() {
   }, []);
   async function logout() {
     if (
-      (contentDirty || modelsDirty || sourcesDirty) &&
+      (contentDirty || modelsDirty || sourcesDirty || securityDirty) &&
       !window.confirm(
-        sourcesDirty
-          ? '搜索配置有未保存修改。确定退出并放弃修改吗？'
-          : modelsDirty
-            ? '模型配置有未保存修改。确定退出并放弃修改吗？'
-            : '文章有未保存修改或正在处理的操作。确定退出并放弃本地编辑吗？',
+        securityDirty
+          ? '账户安全有未完成的操作、未保存输入或恢复码。确定退出并放弃这些内容吗？'
+          : sourcesDirty
+            ? '搜索配置有未保存修改。确定退出并放弃修改吗？'
+            : modelsDirty
+              ? '模型配置有未保存修改。确定退出并放弃修改吗？'
+              : '文章有未保存修改或正在处理的操作。确定退出并放弃本地编辑吗？',
       )
     )
       return;
@@ -73,22 +98,47 @@ export function App() {
     }
   }
   function navigate(next: Section) {
-    if (next === section) return;
+    if (next === section) {
+      setMenuOpen(false);
+      return;
+    }
     if (
-      (contentDirty || modelsDirty || sourcesDirty) &&
+      (contentDirty || modelsDirty || sourcesDirty || securityDirty) &&
       !window.confirm(
-        sourcesDirty
-          ? '搜索配置有未保存修改。确定离开并放弃修改吗？'
-          : modelsDirty
-            ? '模型配置有未保存修改。确定离开并放弃修改吗？'
-            : '文章有未保存修改或正在处理的操作。确定离开并放弃本地编辑吗？',
+        securityDirty
+          ? '账户安全有未完成的操作、未保存输入或恢复码。确定离开并放弃这些内容吗？'
+          : sourcesDirty
+            ? '搜索配置有未保存修改。确定离开并放弃修改吗？'
+            : modelsDirty
+              ? '模型配置有未保存修改。确定离开并放弃修改吗？'
+              : '文章有未保存修改或正在处理的操作。确定离开并放弃本地编辑吗？',
       )
     )
       return;
     setContentDirty(false);
     setModelsDirty(false);
     setSourcesDirty(false);
+    setSecurityDirty(false);
     setSection(next);
+    setMenuOpen(false);
+  }
+  function navigation() {
+    return (
+      <nav aria-label="工作台导航">
+        {sections.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            aria-current={section === id ? 'page' : undefined}
+            className={section === id ? 'active' : ''}
+            onClick={() => navigate(id)}
+          >
+            <Icon size={18} aria-hidden />
+            <span>{label}</span>
+          </button>
+        ))}
+      </nav>
+    );
   }
   if (user === undefined)
     return (
@@ -114,11 +164,15 @@ export function App() {
         onLogin={(session) => {
           setExpired(false);
           setUser(session);
+          window.dispatchEvent(new Event('tattoo:authenticated'));
         }}
       />
     );
   return (
     <>
+      <a href="#workspace-main" className="skip-link">
+        跳到主要内容
+      </a>
       <div
         className="app-shell"
         inert={expired}
@@ -130,79 +184,105 @@ export function App() {
             <Brand />
             <span className="sidebar-subtitle">内容工作台</span>
           </div>
-          <nav aria-label="工作台导航">
-            <button
-              type="button"
-              aria-current={section === 'content' ? 'page' : undefined}
-              className={section === 'content' ? 'active' : ''}
-              onClick={() => navigate('content')}
-            >
-              内容
-            </button>
-            <button
-              type="button"
-              aria-current={section === 'accounts' ? 'page' : undefined}
-              className={section === 'accounts' ? 'active' : ''}
-              onClick={() => navigate('accounts')}
-            >
-              公众号账号
-            </button>
-            <button
-              type="button"
-              aria-current={section === 'sources' ? 'page' : undefined}
-              className={section === 'sources' ? 'active' : ''}
-              onClick={() => navigate('sources')}
-            >
-              资料
-            </button>
-            <button
-              type="button"
-              aria-current={section === 'models' ? 'page' : undefined}
-              className={section === 'models' ? 'active' : ''}
-              onClick={() => navigate('models')}
-            >
-              模型配置
-            </button>
-            <button
-              type="button"
-              aria-current={section === 'records' ? 'page' : undefined}
-              className={section === 'records' ? 'active' : ''}
-              onClick={() => navigate('records')}
-            >
-              投递记录
-            </button>
-          </nav>
+          <p className="nav-caption">工作空间</p>
+          {navigation()}
           <div className="sidebar-footer">
-            <span className="secondary">管理员</span>
-            <span className="user-email">{user.email}</span>
-            <Button size="small" onClick={logout} loading={loggingOut}>
+            <ThemePicker />
+            <div className="user-profile">
+              <span className="user-avatar" aria-hidden>
+                {user.email.slice(0, 1).toUpperCase()}
+              </span>
+              <div>
+                <span className="secondary">管理员</span>
+                <span className="user-email">{user.email}</span>
+              </div>
+            </div>
+            <Button
+              type="text"
+              size="small"
+              onClick={logout}
+              loading={loggingOut}
+              icon={<SignOut aria-hidden />}
+            >
               退出登录
             </Button>
           </div>
         </aside>
-        <main className="main-content">
-          {logoutError && <Alert type="error" showIcon message={logoutError} />}
-          {section === 'content' ? (
-            <Content
-              onDirtyChange={setContentDirty}
-              remoteWritesEnabled={Boolean(user.remoteWritesEnabled)}
-              onInspectRecords={() => navigate('records')}
-              onConfigureModels={() => navigate('models')}
-            />
-          ) : section === 'accounts' ? (
-            <Accounts
-              remoteWritesEnabled={Boolean(user.remoteWritesEnabled)}
-              onInspectRecords={() => navigate('records')}
-            />
-          ) : section === 'models' ? (
-            <Models onDirtyChange={setModelsDirty} />
-          ) : section === 'sources' ? (
-            <Sources onDirtyChange={setSourcesDirty} />
-          ) : (
-            <Records remoteWritesEnabled={Boolean(user.remoteWritesEnabled)} />
-          )}
-        </main>
+        <div className="workspace-area">
+          <header className="workspace-header">
+            <Button
+              className="mobile-menu-button"
+              type="text"
+              size="small"
+              aria-label="打开导航"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(true)}
+            >
+              <List size={20} aria-hidden />
+            </Button>
+            <span className="breadcrumb-root">工作空间</span>
+            <CaretRight size={12} aria-hidden />
+            <span>{sections.find((item) => item.id === section)?.label}</span>
+            <span className="workspace-local">个人工作台</span>
+          </header>
+          <main className="main-content" id="workspace-main" tabIndex={-1}>
+            {logoutError && <Alert type="error" showIcon message={logoutError} />}
+            {section === 'content' ? (
+              <Content
+                onDirtyChange={setContentDirty}
+                remoteWritesEnabled={Boolean(user.remoteWritesEnabled)}
+                onInspectRecords={() => navigate('records')}
+                onConfigureModels={() => navigate('models')}
+              />
+            ) : section === 'accounts' ? (
+              <Accounts
+                remoteWritesEnabled={Boolean(user.remoteWritesEnabled)}
+                onInspectRecords={() => navigate('records')}
+              />
+            ) : section === 'models' ? (
+              <Models onDirtyChange={setModelsDirty} />
+            ) : section === 'sources' ? (
+              <Sources onDirtyChange={setSourcesDirty} />
+            ) : section === 'security' ? (
+              <Security email={user.email} onDirtyChange={setSecurityDirty} />
+            ) : (
+              <Records remoteWritesEnabled={Boolean(user.remoteWritesEnabled)} />
+            )}
+          </main>
+        </div>
       </div>
+      {expired && (
+        <div className="session-expired-scrim" data-ui="session-expired-scrim" aria-hidden="true" />
+      )}
+      <Modal
+        open={menuOpen && !expired}
+        title="工作台导航"
+        width={320}
+        footer={null}
+        onCancel={() => setMenuOpen(false)}
+        className="mobile-navigation"
+      >
+        <div className="sidebar-brand">
+          <Brand />
+        </div>
+        {navigation()}
+        <ThemePicker />
+        <div className="user-profile">
+          <span className="user-email">{user.email}</span>
+        </div>
+        <Button
+          type="text"
+          onClick={() => {
+            setMenuOpen(false);
+            void logout();
+          }}
+          loading={loggingOut}
+          icon={<SignOut aria-hidden />}
+        >
+          退出登录
+        </Button>
+        <Button onClick={() => setMenuOpen(false)}>关闭导航</Button>
+      </Modal>
       <Modal
         open={expired}
         title="会话已过期，请重新登录"
@@ -221,6 +301,7 @@ export function App() {
           onLogin={(session) => {
             setExpired(false);
             setUser(session);
+            window.dispatchEvent(new Event('tattoo:authenticated'));
           }}
         />
       </Modal>

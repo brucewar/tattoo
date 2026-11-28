@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Button, Checkbox, Modal } from 'antd';
+import { Alert, Button, Checkbox, Modal } from './ui';
 import type { Account, Asset } from '@tattoo/contracts';
 import { api, errorMessage, jsonRequest, requestId } from '../api';
 import type { DeliveryRecord } from '../ui';

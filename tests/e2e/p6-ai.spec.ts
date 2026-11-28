@@ -50,6 +50,8 @@ async function login(page: Page) {
 }
 
 async function configure(page: Page, verify = false) {
+  const openNavigation = page.getByRole('button', { name: '打开导航', exact: true });
+  if (await openNavigation.isVisible()) await openNavigation.click();
   await page.getByRole('button', { name: '模型配置', exact: true }).click();
   await expect(page.getByRole('heading', { name: '模型配置', exact: true })).toBeVisible();
   for (const capability of ['text', 'image'] as const) {
@@ -58,10 +60,7 @@ async function configure(page: Page, verify = false) {
     if (capability === 'text') {
       await region.getByLabel('接口协议', { exact: true }).focus();
       await region.getByLabel('接口协议', { exact: true }).press('ArrowDown');
-      await page
-        .locator('.ant-select-dropdown:visible')
-        .getByText('Chat Completions', { exact: true })
-        .click();
+      await page.getByRole('option', { name: 'Chat Completions', exact: true }).click();
     }
     await region.getByLabel('服务地址', { exact: true }).fill(process.env.TATTOO_E2E_AI_BASE_URL!);
     await region.getByLabel('模型名称', { exact: true }).fill(`browser-${capability}-model`);
@@ -90,6 +89,8 @@ async function configure(page: Page, verify = false) {
 }
 
 async function newArticle(page: Page) {
+  const openNavigation = page.getByRole('button', { name: '打开导航', exact: true });
+  if (await openNavigation.isVisible()) await openNavigation.click();
   await page.getByRole('button', { name: '内容', exact: true }).click();
   await page.getByRole('button', { name: '新建文章', exact: true }).click();
   await expect(page.getByRole('heading', { name: '新建文章', exact: true })).toBeVisible();
@@ -154,7 +155,7 @@ test('Responses 与 Anthropic 协议可选择、刷新保留并实际生成文�
     const text = page.getByRole('region', { name: '文本模型', exact: true });
     await text.getByLabel('接口协议', { exact: true }).focus();
     await text.getByLabel('接口协议', { exact: true }).press('ArrowDown');
-    await page.locator('.ant-select-dropdown:visible').getByText(label, { exact: true }).click();
+    await page.getByRole('option', { name: label, exact: true }).click();
     if (protocol === 'anthropic-messages') {
       await expect(text.getByLabel('最大输出 tokens', { exact: true })).toHaveValue('4096');
       await text.getByLabel('最大输出 tokens', { exact: true }).fill('6144');
@@ -177,7 +178,7 @@ test('Responses 与 Anthropic 协议可选择、刷新保留并实际生成文�
     await page.reload();
     await page.getByRole('button', { name: '模型配置', exact: true }).click();
     await expect(page.getByRole('heading', { name: '模型配置', exact: true })).toBeVisible();
-    await expect(text.getByText(label, { exact: true })).toBeVisible();
+    await expect(text.getByRole('combobox', { name: '接口协议', exact: true })).toHaveText(label);
     await expect(text.getByLabel('API Key', { exact: true })).toHaveValue('');
     if (protocol === 'anthropic-messages')
       await expect(text.getByLabel('最大输出 tokens', { exact: true })).toHaveValue('6144');
@@ -304,7 +305,7 @@ test('模型配置、AI 图文候选与明确采用保存，完成模拟微信�
   expect(wechat.calls).toEqual(wechatBefore.calls);
 
   // Generation and adoption are inert until this separate, explicit delivery.
-  await preview.getByRole('button', { name: 'Close', exact: true }).click();
+  await preview.getByRole('button', { name: '关闭弹窗', exact: true }).click();
   const accountSuffix = randomUUID().replaceAll('-', '').slice(0, 16);
   const accountName = `AI 创作验收-${accountSuffix.slice(0, 6)}`;
   const accountResponse = await page.request.post('/api/v1/accounts', {

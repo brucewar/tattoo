@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Input, Spin } from 'antd';
+import { Alert, Button, Input, Spin, Tooltip } from './ui';
+import { ArrowsInSimple, ArrowsOutSimple, SidebarSimple, FloppyDisk } from '@phosphor-icons/react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import type { Article, ArticleInput, Asset, DocumentNode } from '@tattoo/contracts';
 import { articleInput, initialDocument } from '@tattoo/contracts';
@@ -43,6 +44,8 @@ export function ArticleEditor({
   const [revisionActive, setRevisionActive] = useState(false);
   const [deliveryActive, setDeliveryActive] = useState(false);
   const [aiActive, setAiActive] = useState(false);
+  const [metadataOpen, setMetadataOpen] = useState(true);
+  const [focusMode, setFocusMode] = useState(false);
   const bodyFile = useRef<HTMLInputElement>(null);
   const coverFile = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
@@ -295,12 +298,16 @@ export function ArticleEditor({
   });
 
   return (
-    <div className="article-workspace">
+    <div className={`article-workspace${focusMode ? ' is-focused' : ''}`}>
       <div className="article-topline">
         <Button type="text" onClick={back}>
           ← 返回内容列表
         </Button>
-        <span className="save-state" role="status" aria-live="polite">
+        <span
+          className={`save-state${dirty ? ' is-unsaved' : ''}`}
+          role="status"
+          aria-live="polite"
+        >
           {loading
             ? '正在打开文章…'
             : uploading
@@ -316,9 +323,8 @@ export function ArticleEditor({
       </div>
       <div className="page-heading article-heading">
         <div>
-          <p className="eyebrow">留住每一次创作</p>
           <h1>{id || article ? '编辑文章' : '新建文章'}</h1>
-          <p className="secondary">明确保存，每次变化形成一份独立修订。</p>
+          <p className="secondary">每次保存，保留一份可回看的修订。</p>
         </div>
         <div className="article-actions">
           <ArticleRevisionActions
@@ -341,35 +347,84 @@ export function ArticleEditor({
           <Button
             type="primary"
             aria-label="保存文章"
+            aria-keyshortcuts="Control+s Meta+s"
+            title="保存文章（Ctrl / ⌘ + S）"
             onClick={() => void save()}
             loading={saving}
             disabled={busy || loading || overlayActive || Boolean(id && !article)}
           >
+            <FloppyDisk size={16} aria-hidden="true" />
             保存文章
           </Button>
         </div>
       </div>
-      <ArticleGeneration
-        articleId={article?.id ?? id}
-        draft={draft}
-        editor={editor}
-        disabled={
-          busy || loading || revisionActive || deliveryActive || linkOpen || Boolean(id && !article)
-        }
-        onActivityChange={setAiActive}
-        onAdoptArticle={(result) => {
-          editor?.commands.setContent(result.document, { emitUpdate: false });
-          setDraft((current) => ({
-            ...current,
-            title: result.title,
-            digest: result.digest,
-            document: result.document,
-          }));
-        }}
-        onAdoptCover={(coverId) => setDraft((current) => ({ ...current, coverId }))}
-        onNotice={setNotice}
-        onConfigureModels={onConfigureModels}
-      />
+      <div className="writing-view-controls" aria-label="写作视图">
+        <span className="writing-shortcut-hint">
+          手动保存 <kbd>Ctrl / ⌘ S</kbd>
+        </span>
+        <Tooltip title={metadataOpen ? '收起文章信息，扩大写作区域' : '展开作者、摘要和封面设置'}>
+          <Button
+            type="text"
+            size="small"
+            aria-label="文章信息"
+            aria-controls="article-metadata-panel"
+            aria-expanded={metadataOpen && !focusMode}
+            onClick={() => {
+              if (focusMode) {
+                setFocusMode(false);
+                setMetadataOpen(true);
+              } else setMetadataOpen((value) => !value);
+            }}
+          >
+            <SidebarSimple size={16} aria-hidden="true" />
+            文章信息
+          </Button>
+        </Tooltip>
+        <Tooltip title={focusMode ? '显示文章信息和 AI 创作工具' : '收起辅助面板，专注正文'}>
+          <Button
+            type="text"
+            size="small"
+            aria-label={focusMode ? '退出专注写作' : '专注写作'}
+            aria-pressed={focusMode}
+            onClick={() => setFocusMode((value) => !value)}
+          >
+            {focusMode ? (
+              <ArrowsInSimple size={16} aria-hidden="true" />
+            ) : (
+              <ArrowsOutSimple size={16} aria-hidden="true" />
+            )}
+            {focusMode ? '退出专注' : '专注写作'}
+          </Button>
+        </Tooltip>
+      </div>
+      <div hidden={focusMode}>
+        <ArticleGeneration
+          articleId={article?.id ?? id}
+          draft={draft}
+          editor={editor}
+          disabled={
+            busy ||
+            loading ||
+            revisionActive ||
+            deliveryActive ||
+            linkOpen ||
+            Boolean(id && !article)
+          }
+          onActivityChange={setAiActive}
+          onAdoptArticle={(result) => {
+            editor?.commands.setContent(result.document, { emitUpdate: false });
+            setDraft((current) => ({
+              ...current,
+              title: result.title,
+              digest: result.digest,
+              document: result.document,
+            }));
+          }}
+          onAdoptCover={(coverId) => setDraft((current) => ({ ...current, coverId }))}
+          onNotice={setNotice}
+          onConfigureModels={onConfigureModels}
+        />
+      </div>
       {error && (
         <Alert
           type="error"
@@ -399,12 +454,14 @@ export function ArticleEditor({
           <p className="secondary">暂时无法打开文章，请重新加载。</p>
         </div>
       ) : (
-        <div className="article-layout">
+        <div className={`article-layout${!metadataOpen || focusMode ? ' without-metadata' : ''}`}>
           <section className="surface writing-surface" aria-label="文章编辑器">
             <div className="article-title-field">
               <label htmlFor="article-title">标题</label>
-              <Input
+              <Input.TextArea
                 id="article-title"
+                className="article-title-input"
+                rows={1}
                 value={draft.title}
                 placeholder="未命名文章"
                 disabled={busy || overlayActive}
@@ -422,17 +479,22 @@ export function ArticleEditor({
             />
             <EditorContent editor={editor} className="article-editor" />
             <div className="editor-footnote">
-              支持二 / 三级标题、文字样式、列表、引用、代码和本地图片。外部格式使用统一排版。
+              <span>支持标题、列表、引用、代码与图片；粘贴内容使用统一排版。</span>
+              <span>
+                保存快捷键 <kbd>Ctrl / ⌘ S</kbd>
+              </span>
             </div>
           </section>
-          <ArticleMetadata
-            draft={draft}
-            article={article}
-            disabled={busy || overlayActive}
-            onChange={update}
-            onCover={() => coverFile.current?.click()}
-            onRemoveCover={() => setDraft((current) => ({ ...current, coverId: null }))}
-          />
+          <div id="article-metadata-panel" hidden={!metadataOpen || focusMode}>
+            <ArticleMetadata
+              draft={draft}
+              article={article}
+              disabled={busy || overlayActive}
+              onChange={update}
+              onCover={() => coverFile.current?.click()}
+              onRemoveCover={() => setDraft((current) => ({ ...current, coverId: null }))}
+            />
+          </div>
         </div>
       )}
       <input

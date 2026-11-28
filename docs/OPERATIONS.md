@@ -4,6 +4,8 @@
 
 日常启动、日志与升级在部署目录执行。备份和恢复使用匹配版本的管理工具，下面会分别标明命令执行位置。第一次安装请从[部署指南](DEPLOYMENT.md)开始。
 
+下文下载与镜像保存示例针对 `0.1.0-rc.2`，发布状态与镜像 digest 见[版本说明](RELEASE-NOTES.md)中的标签流水线。已部署的旧版本继续保留匹配工具、原配置和主密钥；不要为升级重新生成配置。
+
 ## 查看状态与日志
 
 在保存 `compose.yaml` 和 `.env` 的部署目录执行：
@@ -83,7 +85,7 @@ docker compose -p tattoo --env-file .env up -d --no-build --force-recreate --wai
 以当前候选版为例，在自己的工作目录取得固定版本源码：
 
 ```bash
-git clone --branch v0.1.0-rc.1 --depth 1 https://github.com/brucewar/tattoo.git tattoo-tools
+git clone --branch v0.1.0-rc.2 --depth 1 https://github.com/brucewar/tattoo.git tattoo-tools
 cd tattoo-tools
 node --version
 docker context show
@@ -91,7 +93,7 @@ docker compose version
 docker info --format '{{.OSType}}/{{.Architecture}}'
 ```
 
-不使用 Git 时，可以下载[该版本源码 ZIP](https://github.com/brucewar/tattoo/archive/refs/tags/v0.1.0-rc.1.zip)，解压后进入包含 `scripts` 的目录。后续升级要使用对应版本工具；旧备份使用备份时匹配的工具、Compose 和镜像，不用新工具假定兼容旧数据库。
+不使用 Git 时，可以下载[该版本源码 ZIP](https://github.com/brucewar/tattoo/archive/refs/tags/v0.1.0-rc.2.zip)，解压后进入包含 `scripts` 的目录。后续升级要使用对应版本工具；旧备份使用备份时匹配的工具、Compose 和镜像，不用新工具假定兼容旧数据库。
 
 Docker context 决定操作哪个主机，`DOCKER_CONTEXT`、`DOCKER_HOST` 也可能改变目标。备份归档保存到管理电脑，数据库与素材卷位于 Docker 主机；工具通过标准输入输出传送归档，不要求共享文件路径。远程 context 的连接与认证由管理者配置。[Docker contexts](https://docs.docker.com/engine/manage-resources/contexts/)
 
@@ -140,13 +142,13 @@ docker compose -p tattoo --env-file .env up -d --no-build --wait --wait-timeout 
 在部署目录查看 `docker compose images`。若按本指南使用当前候选版，可把镜像另存到管理电脑：
 
 ```bash
-docker image save --output ../tattoo-backups/tattoo-rc1-images.tar ghcr.io/brucewar/tattoo:0.1.0-rc.1 postgres:16-alpine
+docker image save --output ../tattoo-backups/tattoo-rc2-images.tar ghcr.io/brucewar/tattoo:0.1.0-rc.2 postgres:16-alpine
 ```
 
 使用 `TATTOO_IMAGE` 或源码镜像时，替换为实际使用的镜像引用；不要把上面的候选版名称当作所有备份的固定值。在目标 Docker context 中加载：
 
 ```bash
-docker image load --input ../tattoo-backups/tattoo-rc1-images.tar
+docker image load --input ../tattoo-backups/tattoo-rc2-images.tar
 ```
 
 `save/load` 不包含数据卷和 `.env`。使用命令的文件参数保存二进制归档，避免 Shell 文本重定向改动内容。[Docker image save](https://docs.docker.com/reference/cli/docker/image/save/)
@@ -213,6 +215,8 @@ docker compose -p tattoo-restored --env-file .env ps
 
 重新登录，检查文章、修订、封面、正文图片和账号记录，按恢复演练检查凭证可解密。忘记原密码时使用[管理员密码恢复](#管理员密码恢复)，不重新初始化数据库。
 
+已启用 TOTP 的实例恢复后仍需验证器。恢复会清除旧恢复码、登录挑战和待绑定设置，禁止重放当前或已使用时间步；先等动态码更新再登录，在“账户安全”重新生成并保存恢复码。详见[备份恢复后的登录](ACCOUNT-SECURITY.md#备份恢复后的登录)。
+
 ### 3. 核对旧任务并切换
 
 先确认原实例 Worker 停止，再核对微信后台和恢复来的待核对任务，填写人工结论；模型及搜索任务也先检查已有结果，不自动重新请求。明确补封面时使用页面上的单独操作。
@@ -238,7 +242,7 @@ docker compose -p tattoo-restored --env-file .env up -d --no-build --force-recre
 
 ## 管理员密码恢复
 
-修改 `.env` 的 `ADMIN_PASSWORD` 不会重置已有管理员。应用镜像内提供部署侧重置工具，新密码要求 12 至 256 个字符；重置会撤销全部旧会话。
+登录状态下优先使用[账户安全](ACCOUNT-SECURITY.md#修改密码)修改密码。修改 `.env` 的 `ADMIN_PASSWORD` 不会重置已有管理员。应用镜像内提供部署侧重置工具，新密码要求 12 至 256 个字符；普通重置撤销全部旧会话与登录挑战，保留已启用 TOTP。
 
 在对应部署目录执行，临时输入新密码，不把它写入命令参数或公开记录。
 
@@ -270,6 +274,8 @@ try {
 </details>
 
 恢复实例使用它自己的项目名和环境文件。密码重置失败先检查 API、数据库和迁移状态，不删除数据卷。
+
+验证器与恢复码同时丢失时，只有部署管理员明确使用 `TATTOO_RESET_2FA=true` 并提供新密码，才同时移除双重验证和全部恢复码。群晖 Container Manager 可通过 API 容器的 Bash 终端执行，无需 SSH；完整步骤见[丢失验证器和恢复码](ACCOUNT-SECURITY.md#丢失验证器和恢复码)。
 
 ## 维护记录
 

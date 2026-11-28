@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Modal, Spin, Tag } from 'antd';
+import { Alert, Button, Modal, Spin, Tag } from '../ui';
 import type { Article, ArticlePreview, Revision, RevisionSummary } from '@tattoo/contracts';
 import { api, errorMessage, jsonRequest } from '../../api';
 import { date, type Page } from '../../ui';
@@ -33,6 +33,7 @@ export function ArticleRevisionActions({
   const [previewLoading, setPreviewLoading] = useState(false);
   const historyRequest = useRef<AbortController | null>(null);
   const previewRequest = useRef<AbortController | null>(null);
+  const previewOpener = useRef<HTMLElement | null>(null);
   useEffect(
     () => () => {
       historyRequest.current?.abort();
@@ -75,6 +76,10 @@ export function ArticleRevisionActions({
       onNotice('当前有未保存修改，请先保存后再预览当前文章。');
       return;
     }
+    // The trigger is temporarily disabled while fetching the saved preview.
+    // Capture it before that can move focus back to the document body.
+    previewOpener.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     onError('');
     previewRequest.current?.abort();
     const controller = new AbortController();
@@ -102,6 +107,11 @@ export function ArticleRevisionActions({
     } finally {
       if (!controller.signal.aborted) setPreviewLoading(false);
     }
+  }
+  function closePreview() {
+    if (historicalRevision) setHistoryOpen(true);
+    setPreview(null);
+    setHistoricalRevision(null);
   }
 
   return (
@@ -185,12 +195,9 @@ export function ArticleRevisionActions({
         }
         width={760}
         footer={null}
-        onCancel={() => {
-          if (historicalRevision) setHistoryOpen(true);
-          setPreview(null);
-          setHistoricalRevision(null);
-        }}
+        onCancel={closePreview}
         className="article-preview-modal"
+        returnFocusRef={previewOpener}
       >
         <p className="secondary">固定公众号排版的近似效果，最终以微信后台为准。</p>
         {preview?.warnings.map((warning, index) => (
@@ -240,7 +247,17 @@ export function ArticleRevisionActions({
             <iframe
               title="微信正文预览"
               sandbox="allow-same-origin"
-              srcDoc={`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style>body{margin:0;padding:0 4px;font-family:system-ui,'Microsoft YaHei',sans-serif}img{max-width:100%}</style></head><body>${preview.html}</body></html>`}
+              onLoad={(event) => {
+                // The existing same-origin sandbox permits the parent to bind
+                // this handler; scripts inside the preview remain prohibited.
+                event.currentTarget.contentDocument?.addEventListener('keydown', (key) => {
+                  if (key.key === 'Escape') {
+                    key.preventDefault();
+                    closePreview();
+                  }
+                });
+              }}
+              srcDoc={`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="color-scheme" content="light"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style>:root{color-scheme:light}body{margin:0;padding:0 4px;background:#fff;color:#222;font-family:system-ui,'Microsoft YaHei',sans-serif}img{max-width:100%}</style></head><body>${preview.html}</body></html>`}
             />
           </div>
         )}

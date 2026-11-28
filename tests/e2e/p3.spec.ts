@@ -30,11 +30,13 @@ async function save(page: Page): Promise<Article> {
   const article = (await result.json()).data as Article;
   await expect(page.getByRole('status')).toHaveText(`已保存 · 修订 v${article.version}`);
   const expectedVersion = result.request().postDataJSON().expectedVersion;
-  await expect(page.getByRole('alert')).toContainText(
+  const savedMessage =
     expectedVersion === article.version
       ? `内容未变化，仍为修订 v${article.version}。`
-      : `已保存为修订 v${article.version}。`,
-  );
+      : `已保存为修订 v${article.version}。`;
+  const savedNotice = page.getByRole('note').filter({ hasText: savedMessage });
+  await expect(savedNotice).toHaveText(savedMessage);
+  await expect(savedNotice).toHaveAttribute('aria-live', 'polite');
   await expect(page.getByRole('button', { name: '保存文章', exact: true })).toBeEnabled();
   return article;
 }
@@ -53,7 +55,7 @@ test('不完整稿件可保存，图文刷新一致，历史不可变且预览�
   let preview = page.getByRole('dialog').filter({ hasText: '微信预览 · 修订 v1' });
   await expect(preview.getByText(/尚未设置封面/)).toBeVisible();
   await expect(preview.getByText(/正文为空/)).toBeVisible();
-  await preview.getByRole('button', { name: 'Close', exact: true }).click();
+  await preview.getByRole('button', { name: '关闭弹窗', exact: true }).click();
 
   const title = `P3图文-${randomUUID().slice(0, 8)}`;
   await page.getByLabel('标题', { exact: true }).fill(title);
@@ -125,20 +127,20 @@ test('不完整稿件可保存，图文刷新一致，历史不可变且预览�
     .poll(() => frame.locator('img').evaluate((element: HTMLImageElement) => element.naturalWidth))
     .toBe(120);
   await page.screenshot({ path: testInfo.outputPath('p3-preview-desktop.png'), fullPage: true });
-  await preview.getByRole('button', { name: 'Close', exact: true }).click();
+  await preview.getByRole('button', { name: '关闭弹窗', exact: true }).click();
 
   await page.getByRole('button', { name: '修订历史', exact: true }).click();
   await page.getByRole('button', { name: '查看 v1', exact: true }).click();
   const historical = page.getByRole('dialog').filter({ hasText: '历史修订 v1 · 只读' });
   await expect(historical.getByRole('heading', { name: '未命名文章', exact: true })).toBeVisible();
   await expect(historical.getByText(/正文为空/)).toBeVisible();
-  await historical.getByRole('button', { name: 'Close', exact: true }).click();
+  await historical.getByRole('button', { name: '关闭弹窗', exact: true }).click();
   await expect(historical).not.toBeVisible();
   const history = page
     .getByRole('dialog')
     .filter({ hasText: '查看已保存快照。后续编辑不会覆盖这些内容。' });
   await expect(history).toBeVisible();
-  await history.getByRole('button', { name: 'Close', exact: true }).click();
+  await history.getByRole('button', { name: '关闭弹窗', exact: true }).click();
   await expect(page.getByLabel('标题', { exact: true })).toHaveValue(title);
 });
 
@@ -190,7 +192,9 @@ test('外链图片粘贴明确拒绝，未保存的导航和浏览器刷新可�
       new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
     );
   });
-  await expect(page.getByRole('alert')).toContainText('外链图片');
+  await expect(page.getByRole('note')).toHaveText(
+    '粘贴内容含外链图片。请先将图片保存到本地，再用「正文图片」上传；本次粘贴未插入。',
+  );
   await expect(body).toHaveText('保留这段文字');
   expect(externalRequests).toEqual([]);
   page.once('dialog', (dialog) => dialog.dismiss());

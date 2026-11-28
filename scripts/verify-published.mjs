@@ -255,7 +255,7 @@ try {
         const original = await readFile(firstFile, 'utf8');
         const first = parseEnv(original);
         const second = parseEnv(await readFile(secondFile, 'utf8'));
-        assert.equal(first.TATTOO_VERSION, '0.1.0-rc.1');
+        assert.equal(first.TATTOO_VERSION, '0.1.0-rc.2');
         assert.ok(/^[A-Za-z0-9+/]{43}=$/.test(first.APP_ENCRYPTION_KEY), '主密钥格式无效');
         assert.equal(Buffer.from(first.APP_ENCRYPTION_KEY, 'base64').length, 32);
         assert.ok(/^[a-f0-9]{48}$/.test(first.POSTGRES_PASSWORD), '数据库密码格式无效');

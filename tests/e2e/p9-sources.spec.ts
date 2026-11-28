@@ -58,6 +58,8 @@ async function login(page: Page) {
 }
 
 async function openSources(page: Page) {
+  const openNavigation = page.getByRole('button', { name: '打开导航', exact: true });
+  if (await openNavigation.isVisible()) await openNavigation.click();
   await page.getByRole('button', { name: '资料', exact: true }).click();
   await expect(page.getByRole('heading', { name: '资料', exact: true })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Tavily 搜索配置', exact: true })).toBeVisible();

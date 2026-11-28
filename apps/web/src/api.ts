@@ -31,7 +31,10 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
-      if (response.status === 401 && path !== '/auth/login' && path !== '/auth/me') {
+      if (
+        response.status === 401 &&
+        !['/auth/login', '/auth/login/verify', '/auth/login/cancel', '/auth/me'].includes(path)
+      ) {
         window.dispatchEvent(new Event('tattoo:unauthorized'));
       }
       throw new ApiError(

@@ -1,11 +1,13 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   // The server consumes CommonJS output; Vite compiles the same contracts from TypeScript.
   resolve: {
     alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
       '@tattoo/contracts': fileURLToPath(
         new URL('../../packages/contracts/src/index.ts', import.meta.url),
       ),

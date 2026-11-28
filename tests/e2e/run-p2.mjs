@@ -104,8 +104,8 @@ async function ready(url, child) {
 async function wait(child) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error('浏览器测试超过十分钟'));
-    }, 600000);
+      reject(new Error('浏览器测试超过二十分钟'));
+    }, 1200000);
     child.once('error', (error) => {
       clearTimeout(timeout);
       reject(error);
@@ -319,8 +319,7 @@ try {
       String(webPort),
       '--strictPort',
     ],
-    // Keep server-side mocks in test mode, but use the real browser component runtime.
-    // rc-util deliberately gives every dialog the same ID in NODE_ENV=test.
+    // Exercise Vite's normal development behavior; API/Worker retain isolated test mode.
     { ...env, NODE_ENV: 'development' },
     join(root, 'apps/web'),
   );

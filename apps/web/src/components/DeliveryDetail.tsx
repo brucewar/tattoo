@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Checkbox, Form, Input, Radio, Spin } from 'antd';
+import { Alert, Button, Checkbox, Input, Radio, Spin } from './ui';
 import { api, errorMessage, jsonRequest } from '../api';
 import { date, StateTag, type DeliveryRecord } from '../ui';
 
@@ -54,6 +54,7 @@ export function DeliveryDetail({
   const [stopped, setStopped] = useState(false);
   const [retryConfirmed, setRetryConfirmed] = useState(false);
   const [resolved, setResolved] = useState(false);
+  const [resolution, setResolution] = useState({ outcome: 'created', note: '', remoteId: '' });
   async function resolve(values: { outcome: string; note: string; remoteId?: string }) {
     setPending(true);
     setActionError('');
@@ -156,40 +157,61 @@ export function DeliveryDetail({
           <Checkbox checked={stopped} onChange={(event) => setStopped(event.target.checked)}>
             我已确认旧 Worker 停止，并在微信后台核对了结果
           </Checkbox>
-          <Form
-            layout="vertical"
-            onFinish={resolve}
-            requiredMark={false}
-            initialValues={{ outcome: 'created' }}
-            preserve={false}
+          <form
+            className="workspace-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!stopped || pending) return;
+              if (resolution.note.trim().length < 5) {
+                setActionError('请至少填写 5 个字符说明核对依据');
+                return;
+              }
+              void resolve(resolution);
+            }}
           >
-            <Form.Item label="核对结果" name="outcome" rules={[{ required: true }]}>
-              <Radio.Group>
+            <div className="form-field">
+              <span className="field-label" id="reconcile-outcome-label">
+                核对结果
+              </span>
+              <Radio.Group
+                aria-label="核对结果"
+                value={resolution.outcome}
+                disabled={pending}
+                onChange={(event) => setResolution({ ...resolution, outcome: event.target.value })}
+              >
                 <Radio value="created">确认已创建</Radio>
                 <Radio value="not_created">确认未创建</Radio>
               </Radio.Group>
-            </Form.Item>
-            <Form.Item
-              label="核对说明"
-              name="note"
-              rules={[
-                { required: true, whitespace: true, message: '请记录核对依据' },
-                { min: 5, message: '请至少填写 5 个字符说明核对依据' },
-              ]}
-            >
+            </div>
+            <div className="form-field">
+              <label htmlFor="reconcile-note">核对说明</label>
               <Input.TextArea
+                id="reconcile-note"
+                required
+                minLength={5}
+                value={resolution.note}
+                disabled={pending}
+                onChange={(event) => setResolution({ ...resolution, note: event.target.value })}
                 rows={3}
                 maxLength={1000}
                 placeholder="例如：已检查此账号草稿箱，记录标题与创建时间。"
               />
-            </Form.Item>
-            <Form.Item label="远程草稿 ID（可选）" name="remoteId">
-              <Input maxLength={256} placeholder="微信后台可取得时填写" />
-            </Form.Item>
+            </div>
+            <div className="form-field">
+              <label htmlFor="reconcile-id">远程草稿 ID（可选）</label>
+              <Input
+                id="reconcile-id"
+                disabled={pending}
+                value={resolution.remoteId}
+                onChange={(event) => setResolution({ ...resolution, remoteId: event.target.value })}
+                maxLength={256}
+                placeholder="微信后台可取得时填写"
+              />
+            </div>
             <Button htmlType="submit" type="primary" loading={pending} disabled={!stopped}>
               记录核对结果
             </Button>
-          </Form>
+          </form>
         </div>
       )}
       {delivery.state === 'FAILED' && (
