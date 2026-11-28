@@ -3,6 +3,7 @@ import { Alert, Button, Empty, Input, Modal, Pagination, Spin, Steps } from '../
 import type { AiModels, TopicCreationTask } from '@tattoo/contracts';
 import { api, ApiError, errorMessage, jsonRequest, requestId } from '../../api';
 import { date, type Page } from '../../ui';
+import { isDemo } from '../../demo/mode';
 import { GenerationResult, GenerationState, generationPending } from './Generation';
 
 type PendingRequest =
@@ -246,7 +247,9 @@ export function TopicCreation({
         />
       </label>
       <p className="form-note">
-        会调用已配置的文本和图片模型，可能产生两项服务费用。无需提供资料或封面要求；生成后请审阅内容，再决定是否存入微信草稿。
+        {isDemo
+          ? '演示使用固定的本地文章与封面，不调用模型，也不产生服务费用。生成后可打开编辑并保存修订。'
+          : '会调用已配置的文本和图片模型，可能产生两项服务费用。无需提供资料或封面要求；生成后请审阅内容，再决定是否存入微信草稿。'}
       </p>
       {modelsError && <Alert type="error" showIcon message={modelsError} />}
       {!loadingModels && !modelsError && !configured && (

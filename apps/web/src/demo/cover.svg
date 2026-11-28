@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-label="Tattoo 演示封面">
+  <rect width="1200" height="675" fill="#183d31"/>
+  <circle cx="1010" cy="140" r="280" fill="#275443"/>
+  <path d="M740 370h260v165H740z" fill="#e2e9d7"/>
+  <path d="M765 345h260v165H765z" fill="#aac0a0"/>
+  <path d="M790 320h260v165H790z" fill="#f4f6ed"/>
+  <path d="M825 365h180m-180 35h130m-130 35h155" stroke="#73927d" stroke-width="7"/>
+  <text x="90" y="150" fill="#b5cbb5" font-size="30" font-family="system-ui,sans-serif">TATTOO / DEMO</text>
+  <text x="85" y="350" fill="#f4f6ed" font-size="76" font-weight="700" font-family="system-ui,sans-serif">让灵感成为文章</text>
+  <text x="90" y="430" fill="#b5cbb5" font-size="30" font-family="system-ui,sans-serif">收集 · 创作 · 修订</text>
+</svg>

@@ -3,6 +3,7 @@ import type { Article, ArticleInput } from '@tattoo/contracts';
 import { WECHAT_DIGEST_MAX_LENGTH } from '@tattoo/contracts';
 import { date } from '../../ui';
 import { assetUrl } from './document';
+import { isDemo } from '../../demo/mode';
 
 export function ArticleMetadata({
   draft,
@@ -86,7 +87,11 @@ export function ArticleMetadata({
             </Button>
           )}
         </div>
-        <p className="form-note">JPG / PNG，单张不超过 10 MiB、2000 万像素。图片读取需要登录。</p>
+        <p className="form-note">
+          {isDemo
+            ? 'JPG / PNG，单张不超过 2 MiB，仅保存在当前浏览器。'
+            : 'JPG / PNG，单张不超过 10 MiB、2000 万像素。图片读取需要登录。'}
+        </p>
       </div>
       {article && (
         <p className="saved-at">

@@ -12,6 +12,11 @@ export class ApiError extends Error {
 type RequestOptions = RequestInit & { timeoutMs?: number };
 
 export async function api<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  if (import.meta.env.MODE === 'demo') {
+    const { demoApi } = await import('./demo/api');
+    options.signal?.throwIfAborted();
+    return demoApi(path, options) as Promise<T>;
+  }
   const { timeoutMs = 15000, signal, ...init } = options;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);

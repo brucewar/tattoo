@@ -11,7 +11,7 @@
 [![Docker](https://img.shields.io/badge/GHCR-linux%2Famd64-2496ED?logo=docker&logoColor=white)](docs/DEPLOYMENT.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[快速部署](#快速部署) · [开始使用](docs/GETTING-STARTED.md) · [文档](docs/README.md) · [常见问题](docs/FAQ.md) · [反馈问题](https://github.com/brucewar/tattoo/issues/new/choose)
+[在线演示](https://brucewar.github.io/tattoo/) · [快速部署](#快速部署) · [开始使用](docs/GETTING-STARTED.md) · [文档](docs/README.md) · [常见问题](docs/FAQ.md) · [反馈问题](https://github.com/brucewar/tattoo/issues/new/choose)
 
 </div>
 
@@ -20,6 +20,8 @@
 <p align="center"><sub>真实界面，使用演示数据与本地模拟模型响应；封面为 AI 生成示例。截图不代表真实模型效果或第三方接口验收。</sub></p>
 
 ## 从灵感到草稿
+
+无需安装即可体验 [GitHub Pages 演示](https://brucewar.github.io/tattoo/)：编辑示例文章、保存修订、微信预览，以及使用固定示例体验 AI 创作。修改仅保存在当前浏览器，可点击“重置演示”恢复；不调用真实模型、搜索或微信服务，不保存凭证。首次发布需按[演示部署说明](docs/DEMO.md)启用 Pages。
 
 **输入主题 → 生成文章与封面 → 编辑、保存与预览 → 确认后存入微信草稿。**
 

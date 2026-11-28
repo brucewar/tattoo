@@ -1,9 +1,21 @@
 import { Node } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { safeHttpUrl } from '@tattoo/contracts';
+import { isDemo } from '../../demo/mode';
 
 const assetIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const assetUrl = (id: string) => `/api/v1/assets/${id}`;
+export const assetUrl = (id: string) => (isDemo ? demoAssetUrl(id) : `/api/v1/assets/${id}`);
+
+// Demo assets are resolved locally, including when hosted below /tattoo/.
+function demoAssetUrl(id: string) {
+  try {
+    const data = localStorage.getItem(`tattoo:demo:asset:${id}`);
+    if (data && /^data:image\/(png|jpeg);base64,/.test(data)) return data;
+  } catch {
+    /* The bundled cover remains available when storage is blocked. */
+  }
+  return new URL('../../demo/cover.svg', import.meta.url).href;
+}
 
 // Only an asset reference is persisted. Browser URLs are derived at render time.
 export const LocalImage = Node.create({

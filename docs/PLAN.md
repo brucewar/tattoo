@@ -244,6 +244,14 @@ P9 的实现与本机证据见 [验证记录](P9-VERIFICATION.md)，P10 保持�
 
 详细范围见 [SPEC 第 15 节](SPEC.md#15-单管理员账户安全2026-11-28已确认)、[OpenSpec 提案](../openspec/changes/account-security/proposal.md)、[设计](../openspec/changes/account-security/design.md) 和 [实施清单](../openspec/changes/account-security/tasks.md)。使用方式见[账户安全](ACCOUNT-SECURITY.md)，实际结果见 [P14 验证记录](P14-VERIFICATION.md)。真实手机 App 扫码、目标部署环境与镜像发布证据分开记录；不把旧阶段的验证直接当作本次账户安全验收。
 
+## GitHub Pages 演示（2026-11-28）
+
+- [x] 复用工作台，增加独立静态演示构建、浏览器内文章与修订、固定 AI 示例及重置入口。
+- [x] 演示写入采用明确允许列表，禁用凭证保存、真实模型、微信投递和联网采集。
+- [x] 增加 GitHub Actions Pages 部署、子路径配置、演示单元与浏览器检查，以及[使用说明](DEMO.md)。
+- [x] 本地通过 294 项单元测试、2 项演示浏览器检查、正式与演示前端构建；检查桌面与手机截图，并确认正式产物不含演示数据适配器。
+- [ ] GitHub 仓库启用 Pages、推送代码并确认远程部署结果。
+
 ## 验证层次与工具
 
 | 层次   | 验证内容                                           | 计划工具                             |

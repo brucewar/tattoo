@@ -17,6 +17,9 @@
     "packages/*"
   ],
   "scripts": {
+    "dev:demo": "npm run dev:demo -w @tattoo/web",
+    "build:demo": "npm run build:demo -w @tattoo/web",
+    "preview:demo": "npm run preview:demo -w @tattoo/web",
     "dev": "npm run build -w @tattoo/contracts && concurrently -k -n contracts,api,web \"npm run dev -w @tattoo/contracts\" \"npm run dev -w @tattoo/server\" \"npm run dev -w @tattoo/web\"",
     "build": "npm run db:generate && npm run build -w @tattoo/contracts && npm run build -w @tattoo/server && npm run build -w @tattoo/web",
     "typecheck": "npm run db:generate && npm run build -w @tattoo/contracts && npm run typecheck --workspaces --if-present",

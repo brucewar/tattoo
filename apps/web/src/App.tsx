@@ -21,6 +21,7 @@ import { Content } from './views/Content';
 import { Models } from './views/Models';
 import { Sources } from './views/Sources';
 import { Security } from './views/Security';
+import { isDemo } from './demo/mode';
 
 type Section = 'content' | 'accounts' | 'records' | 'models' | 'sources' | 'security';
 const sections = [
@@ -69,6 +70,14 @@ export function App() {
     return () => window.removeEventListener('tattoo:unauthorized', unauthorized);
   }, []);
   async function logout() {
+    if (isDemo) {
+      if (window.confirm('重置演示会清除本浏览器中的演示文章、修订与图片。确定继续吗？')) {
+        const { resetDemo } = await import('./demo/api');
+        resetDemo();
+        window.location.reload();
+      }
+      return;
+    }
     if (
       (contentDirty || modelsDirty || sourcesDirty || securityDirty) &&
       !window.confirm(
@@ -204,7 +213,7 @@ export function App() {
               loading={loggingOut}
               icon={<SignOut aria-hidden />}
             >
-              退出登录
+              {isDemo ? '重置演示' : '退出登录'}
             </Button>
           </div>
         </aside>
@@ -226,6 +235,22 @@ export function App() {
             <span className="workspace-local">个人工作台</span>
           </header>
           <main className="main-content" id="workspace-main" tabIndex={-1}>
+            {isDemo && (
+              <Alert
+                type="info"
+                showIcon
+                message="在线演示 · 修改仅保存在当前浏览器；AI 使用固定示例，微信投递、联网采集与凭证保存已关闭。请勿输入真实密钥或密码。"
+                action={
+                  <a
+                    href="https://github.com/brucewar/tattoo#快速部署"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    部署自己的工作台
+                  </a>
+                }
+              />
+            )}
             {logoutError && <Alert type="error" showIcon message={logoutError} />}
             {section === 'content' ? (
               <Content
@@ -279,7 +304,7 @@ export function App() {
           loading={loggingOut}
           icon={<SignOut aria-hidden />}
         >
-          退出登录
+          {isDemo ? '重置演示' : '退出登录'}
         </Button>
         <Button onClick={() => setMenuOpen(false)}>关闭导航</Button>
       </Modal>
